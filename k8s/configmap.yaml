@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mdm-config
+  namespace: mdm-system
+data:
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  LOG_LEVEL: "INFO"

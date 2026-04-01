@@ -1,0 +1,121 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: customer-mastering-service
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/mdm_db}
+    username: ${DATABASE_USERNAME:mdm_user}
+    password: ${DATABASE_PASSWORD:mdm_password}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: customer-mastering-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.mdm.mastering.dto
+        spring.json.use.type.headers: false
+      max-poll-records: 100
+
+kafka:
+  topics:
+    customer-raw: customer.raw
+    customer-mastered: customer.mastered
+
+# ===========================================
+# OBSERVABILITY CONFIGURATION
+# ===========================================
+management:
+  # Expose all actuator endpoints
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+    health:
+      show-details: always
+      probes:
+        enabled: true
+
+  # Health indicators
+  health:
+    db:
+      enabled: true
+    kafka:
+      enabled: true
+
+  # Metrics configuration
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      environment: ${SPRING_PROFILES_ACTIVE:dev}
+
+    # Distribution statistics for latency metrics
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        mdm.event_processing_latency_seconds: true
+        mdm.deduplication_lookup_latency_seconds: true
+
+      # SLO buckets for latency (in seconds)
+      slo:
+        mdm.event_processing_latency_seconds: 10ms,50ms,100ms,250ms,500ms,1s
+        mdm.deduplication_lookup_latency_seconds: 1ms,5ms,10ms,25ms,50ms,100ms
+
+      # Expiry for percentiles
+      percentiles:
+        http.server.requests: 0.5,0.95,0.99
+        mdm.event_processing_latency_seconds: 0.5,0.95,0.99
+        mdm.deduplication_lookup_latency_seconds: 0.5,0.95,0.99
+
+    # Export configuration
+    export:
+      prometheus:
+        enabled: true
+        step: 15s
+
+  # Prometheus endpoint
+  endpoint:
+    prometheus:
+      enabled: true
+    health:
+      enabled: true
+      show-details: always
+    info:
+      enabled: true
+    metrics:
+      enabled: true
+
+  # Server configuration
+  server:
+    port: 8081
+    add-application-context-header: false
+
+# ===========================================
+# LOGGING CONFIGURATION
+# ===========================================
+logging:
+  pattern:
+    console: "%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(%5p){blue} %clr([%t]){magenta} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n"
+    level: "%clr(%5p){faint}"
+  level:
+    root: INFO
+    com.mdm: DEBUG
+    org.springframework.kafka: WARN
+    org.hibernate: WARN
+    io.micrometer: DEBUG
+  json:
+    enabled: ${LOG_JSON:false}

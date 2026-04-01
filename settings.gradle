@@ -1,0 +1,4 @@
+rootProject.name = 'mdm-mvp'
+
+include 'customer-ingestion-service'
+include 'customer-mastering-service'

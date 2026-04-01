@@ -1,0 +1,71 @@
+// Root build.gradle for MDM MVP project
+// This file configures shared settings across all subprojects
+
+plugins {
+    id 'base'
+    id 'org.owasp.dependencycheck' version '9.0.9' apply false
+}
+
+// Shared configuration for all subprojects
+subprojects {
+    apply plugin: 'org.owasp.dependencycheck'
+    
+    dependencyCheck {
+        // Fail build on CVSS score >= 7 (High)
+        failBuildOnCVSS = 7
+        
+        // Suppress known false positives
+        suppressionFiles = [
+            'config/dependency-check/suppressions.xml'
+        ]
+        
+        // Skip test dependencies
+        skipConfigurations = [
+            'testCompileClasspath',
+            'testRuntimeClasspath'
+        ]
+        
+        // Reporting
+        formats = ['HTML', 'JUNIT']
+        
+        // NVD API key (optional, increases rate limit)
+        // nvd.api.key = System.getenv('NVD_API_KEY')
+    }
+}
+
+// Aggregate tasks
+tasks.register('fullCodeQuality') {
+    group = 'Verification'
+    description = 'Runs code quality checks on all subprojects'
+    
+    subprojects.each { project ->
+        project.plugins.withType(JavaPlugin) {
+            dependsOn "${project.path}:checkstyleMain"
+            dependsOn "${project.path}:checkstyleTest"
+            dependsOn "${project.path}:spotlessCheck"
+            dependsOn "${project.path}:spotbugsMain"
+        }
+    }
+}
+
+tasks.register('fullBuild') {
+    group = 'Build'
+    description = 'Builds all subprojects'
+    
+    subprojects.each { project ->
+        project.plugins.withType(JavaPlugin) {
+            dependsOn "${project.path}:build"
+        }
+    }
+}
+
+tasks.register('fullTest') {
+    group = 'Verification'
+    description = 'Runs all tests'
+    
+    subprojects.each { project ->
+        project.plugins.withType(JavaPlugin) {
+            dependsOn "${project.path}:test"
+        }
+    }
+}

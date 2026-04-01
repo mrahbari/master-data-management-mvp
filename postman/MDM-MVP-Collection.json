@@ -1,0 +1,1512 @@
+{
+  "info": {
+    "name": "MDM MVP - Customer Management",
+    "description": "Complete Postman collection for testing the MDM (Master Data Management) MVP system with CQRS architecture.\n\n## Collection Structure\n\n1. **Health & Setup** - Service health checks\n2. **Command Side (Write)** - Customer ingestion\n3. **Query Side (Read)** - Customer queries\n4. **Survivable Matching Examples** - Test the 5 matching rules\n5. **Security** - OAuth2 testing\n6. **Validation & Errors** - Error handling\n7. **Observability** - Metrics\n\n## Environment Variables\n\n- `base_url_ingestion`: http://localhost:8080\n- `base_url_mastering`: http://localhost:8081\n- `oauth_token`: JWT token (optional)\n\n## Quick Start\n\n1. Import collection to Postman\n2. Import environment\n3. Run requests in order",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - OAuth2 Authentication",
+      "item": [
+        {
+          "name": "Get Token - Admin User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 200\", function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.test(\"Has access_token\", function() {",
+                  "    pm.expect(jsonData.access_token).to.exist;",
+                  "});",
+                  "// Save token to environment",
+                  "pm.environment.set(\"oauth_token\", jsonData.access_token);",
+                  "pm.environment.set(\"admin_token\", jsonData.access_token);",
+                  "console.log(\"Admin token saved: \" + jsonData.access_token.substring(0, 50) + \"...\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"grant_type\": \"password\",\n  \"client_id\": \"mdm-client\",\n  \"client_secret\": \"mdm-secret\",\n  \"username\": \"admin\",\n  \"password\": \"admin123\"\n}"
+            },
+            "url": {
+              "raw": "{{oauth_url}}/oauth/token",
+              "host": [
+                "{{oauth_url}}"
+              ],
+              "path": [
+                "oauth",
+                "token"
+              ]
+            },
+            "description": "Get JWT token for admin user (full access: ADMIN, CUSTOMER_WRITE, CUSTOMER_READ)"
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"access_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"token_type\": \"Bearer\",\n  \"expires_in\": 3600,\n  \"refresh_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"scope\": \"\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Token - Regular User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 200\", function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.environment.set(\"user_token\", jsonData.access_token);",
+                  "console.log(\"User token saved\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"grant_type\": \"password\",\n  \"client_id\": \"mdm-client\",\n  \"client_secret\": \"mdm-secret\",\n  \"username\": \"user\",\n  \"password\": \"user123\"\n}"
+            },
+            "url": {
+              "raw": "{{oauth_url}}/oauth/token",
+              "host": [
+                "{{oauth_url}}"
+              ],
+              "path": [
+                "oauth",
+                "token"
+              ]
+            },
+            "description": "Get JWT token for regular user (write access only: CUSTOMER_WRITE)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Token - Read-Only User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 200\", function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.environment.set(\"readonly_token\", jsonData.access_token);",
+                  "console.log(\"Read-only token saved\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"grant_type\": \"password\",\n  \"client_id\": \"mdm-client\",\n  \"client_secret\": \"mdm-secret\",\n  \"username\": \"readonly\",\n  \"password\": \"readonly123\"\n}"
+            },
+            "url": {
+              "raw": "{{oauth_url}}/oauth/token",
+              "host": [
+                "{{oauth_url}}"
+              ],
+              "path": [
+                "oauth",
+                "token"
+              ]
+            },
+            "description": "Get JWT token for read-only user (read access only: CUSTOMER_READ)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Token - Client Credentials",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 200\", function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.environment.set(\"client_token\", jsonData.access_token);",
+                  "console.log(\"Client credentials token saved\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"grant_type\": \"client_credentials\",\n  \"client_id\": \"mdm-client\",\n  \"client_secret\": \"mdm-secret\"\n}"
+            },
+            "url": {
+              "raw": "{{oauth_url}}/oauth/token",
+              "host": [
+                "{{oauth_url}}"
+              ],
+              "path": [
+                "oauth",
+                "token"
+              ]
+            },
+            "description": "Get JWT token using client credentials flow (machine-to-machine)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Info",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 200\", function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.test(\"Has subject\", function() {",
+                  "    pm.expect(jsonData.sub).to.exist;",
+                  "});",
+                  "console.log(\"User: \" + jsonData.sub + \" with roles: \" + jsonData.roles);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{oauth_url}}/oauth/userinfo",
+              "host": [
+                "{{oauth_url}}"
+              ],
+              "path": [
+                "oauth",
+                "userinfo"
+              ]
+            },
+            "description": "Get current user information from OAuth2 server"
+          },
+          "response": []
+        },
+        {
+          "name": "OAuth2 Discovery",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{oauth_url}}/.well-known/openid-configuration",
+              "host": [
+                "{{oauth_url}}"
+              ],
+              "path": [
+                ".well-known",
+                "openid-configuration"
+              ]
+            },
+            "description": "Get OAuth2/OpenID Connect configuration"
+          },
+          "response": [
+            {
+              "name": "Discovery Response",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"issuer\": \"http://localhost:9999\",\n  \"authorization_endpoint\": \"http://localhost:9999/oauth/authorize\",\n  \"token_endpoint\": \"http://localhost:9999/oauth/token\",\n  \"userinfo_endpoint\": \"http://localhost:9999/oauth/userinfo\",\n  \"jwks_uri\": \"http://localhost:9999/.well-known/jwks.json\",\n  \"response_types_supported\": [\"code\", \"token\"],\n  \"grant_types_supported\": [\"authorization_code\", \"password\", \"client_credentials\"],\n  \"token_endpoint_auth_methods_supported\": [\"client_secret_basic\"]\n}"
+            }
+          ]
+        }
+      ],
+      "description": "OAuth2 authentication and token management. Run these first to get JWT tokens for API requests."
+    },
+    {
+      "name": "01 - Health & Setup",
+      "item": [
+        {
+          "name": "Health Check - Ingestion Service",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_ingestion}}/actuator/health",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"status\": \"UP\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Health Check - Mastering Service",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/health",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Detailed Health - All Indicators",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/health?show-details=always",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ],
+              "query": [
+                {
+                  "key": "show-details",
+                  "value": "always"
+                }
+              ]
+            },
+            "description": "Shows all 5 health indicators: db, kafka, mdmProcessing, liveness, readiness"
+          },
+          "response": [
+            {
+              "name": "All Services UP",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"status\": \"UP\",\n  \"components\": {\n    \"db\": {\n      \"status\": \"UP\",\n      \"details\": {\n        \"queryTimeMs\": 3,\n        \"rawTableRows\": 1542,\n        \"goldenTableRows\": 892\n      }\n    },\n    \"kafka\": {\n      \"status\": \"UP\",\n      \"details\": {\n        \"produceTimeMs\": 12,\n        \"bootstrapServers\": \"kafka:9092\"\n      }\n    },\n    \"mdmProcessing\": {\n      \"status\": \"UP\",\n      \"details\": {\n        \"lastProcessingTime\": \"2024-01-15T10:30:00Z\",\n        \"totalProcessed\": 1542,\n        \"totalDuplicates\": 423,\n        \"duplicateRate\": \"27%\"\n      }\n    }\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Command Side (Write)",
+      "item": [
+        {
+          "name": "Ingest Customer - John Doe",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 202\", function() {",
+                  "    pm.response.to.have.status(202);",
+                  "});",
+                  "pm.environment.set(\"test_customer_email\", \"john.doe@example.com\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john.doe@example.com\",\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"phone\": \"+1-555-123-4567\",\n  \"sourceSystem\": \"postman-test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/customers",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            },
+            "description": "Ingest first customer. Returns 202 Accepted (async processing). Requires OAuth2 token with CUSTOMER_WRITE scope."
+          },
+          "response": [
+            {
+              "name": "Success - 202 Accepted",
+              "status": "Accepted",
+              "code": 202,
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Wait for Processing",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/health",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            },
+            "description": "Wait 5 seconds for Kafka processing to complete"
+          },
+          "response": []
+        },
+        {
+          "name": "Ingest Customer - Jane Smith",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 202\", function() {",
+                  "    pm.response.to.have.status(202);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"jane.smith@example.com\",\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Smith\",\n  \"phone\": \"+1-555-222-3333\",\n  \"sourceSystem\": \"postman-test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/customers",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 - Query Side (Read)",
+      "item": [
+        {
+          "name": "Get Customer Count",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 200\", function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.test(\"Has totalCustomers\", function() {",
+                  "    pm.expect(jsonData.totalCustomers).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/api/customers/count",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "count"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"totalCustomers\": 2\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Customer By Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 200\", function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.environment.set(\"test_customer_id\", jsonData.id);",
+                  "pm.test(\"Has customer data\", function() {",
+                  "    pm.expect(jsonData.email).to.eql(pm.environment.get(\"test_customer_email\"));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/api/customers/by-email?email={{test_customer_email}}",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "by-email"
+              ],
+              "query": [
+                {
+                  "key": "email",
+                  "value": "{{test_customer_email}}"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"email\": \"john.doe@example.com\",\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"phone\": \"+1-555-123-4567\",\n  \"confidenceScore\": 100,\n  \"version\": 1,\n  \"createdAt\": \"2024-01-15T10:30:00Z\",\n  \"updatedAt\": \"2024-01-15T10:30:00Z\",\n  \"lastSourceSystem\": \"postman-test\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Customer By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/api/customers/{{test_customer_id}}",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{test_customer_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List All Customers (Paginated)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/api/customers?page=0&size=20&sort=updatedAt,desc",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                },
+                {
+                  "key": "sort",
+                  "value": "updatedAt,desc"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"content\": [\n    {\n      \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n      \"email\": \"john.doe@example.com\",\n      \"firstName\": \"John\",\n      \"lastName\": \"Doe\"\n    },\n    {\n      \"id\": \"660e8400-e29b-41d4-a716-446655440001\",\n      \"email\": \"jane.smith@example.com\",\n      \"firstName\": \"Jane\",\n      \"lastName\": \"Smith\"\n    }\n  ],\n  \"totalElements\": 2,\n  \"totalPages\": 1,\n  \"size\": 20,\n  \"number\": 0\n}"
+            }
+          ]
+        },
+        {
+          "name": "Check Customer Exists",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/api/customers/exists?email={{test_customer_email}}",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "exists"
+              ],
+              "query": [
+                {
+                  "key": "email",
+                  "value": "{{test_customer_email}}"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Customer Exists",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"email\": \"john.doe@example.com\",\n  \"exists\": true\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Survivable Matching Examples",
+      "item": [
+        {
+          "name": "Example 1: Duplicate (Same Email Different Case)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 202\", function() {",
+                  "    pm.response.to.have.status(202);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"JOHN.DOE@EXAMPLE.COM\",\n  \"firstName\": \"Johnny\",\n  \"lastName\": \"Doe\",\n  \"phone\": \"+1-555-999-8888\",\n  \"sourceSystem\": \"postman-test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/customers",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            },
+            "description": "Submit duplicate with same email (different case). Should be detected as exact email match duplicate."
+          },
+          "response": []
+        },
+        {
+          "name": "Example 2: Nickname Match (Jon vs John)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"jon.doe@example.com\",\n  \"firstName\": \"Jon\",\n  \"lastName\": \"Doe\",\n  \"phone\": \"555-123-4567\",\n  \"sourceSystem\": \"postman-test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/customers",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            },
+            "description": "Submit with nickname 'Jon' instead of 'John'. Should be detected via nickname matching rule."
+          },
+          "response": []
+        },
+        {
+          "name": "Example 3: Typo Match (Jone vs John)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"jone.doe@example.com\",\n  \"firstName\": \"Jone\",\n  \"lastName\": \"Doe\",\n  \"phone\": \"555-123-4567\",\n  \"sourceSystem\": \"postman-test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/customers",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            },
+            "description": "Submit with typo 'Jone' instead of 'John'. Should be detected via Levenshtein distance rule."
+          },
+          "response": []
+        },
+        {
+          "name": "Example 4: Phonetic Match (Robert/Rupert)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"rupert.smith@example.com\",\n  \"firstName\": \"Rupert\",\n  \"lastName\": \"Smyth\",\n  \"phone\": \"555-999-7777\",\n  \"sourceSystem\": \"postman-test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/customers",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            },
+            "description": "Submit 'Rupert Smyth' which sounds like 'Robert Smith'. Should be detected via Soundex phonetic matching."
+          },
+          "response": []
+        },
+        {
+          "name": "Example 5: Phone Format Match",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"jane.smith2@example.com\",\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Smith\",\n  \"phone\": \"(555) 222-3333\",\n  \"sourceSystem\": \"postman-test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/customers",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            },
+            "description": "Submit with different phone format '(555) 222-3333' vs '555-222-3333'. Should match via phone normalization."
+          },
+          "response": []
+        },
+        {
+          "name": "Example 6: Email Typo Detection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john.doe@exmple.com\",\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"phone\": \"555-123-4567\",\n  \"sourceSystem\": \"postman-test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/customers",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            },
+            "description": "Submit with email typo 'exmple.com' instead of 'example.com'. Should be detected via email similarity rule."
+          },
+          "response": []
+        },
+        {
+          "name": "Example 7: Gmail Dots Equivalence",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"j.o.h.n.d.o.e@gmail.com\",\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"phone\": \"555-111-2222\",\n  \"sourceSystem\": \"postman-test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/customers",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            },
+            "description": "Submit Gmail with dots. Gmail ignores dots so 'j.o.h.n.d.o.e@gmail.com' = 'johndoe@gmail.com'."
+          },
+          "response": []
+        },
+        {
+          "name": "Example 8: Multiple Nicknames (Bob/Robert)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bob.johnson@example.com\",\n  \"firstName\": \"Bob\",\n  \"lastName\": \"Johnson\",\n  \"phone\": \"555-333-4444\",\n  \"sourceSystem\": \"postman-test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/customers",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            },
+            "description": "Submit 'Bob' which is a nickname for 'Robert'. Should match via nickname rule."
+          },
+          "response": []
+        },
+        {
+          "name": "Wait & Check Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/metrics/mdm.duplicates_detected_total",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "metrics",
+                "mdm.duplicates_detected_total"
+              ]
+            },
+            "description": "Check how many duplicates were detected from the survivable matching examples."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "05 - Validation & Errors",
+      "item": [
+        {
+          "name": "Missing Email (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 400\", function() {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Test\",\n  \"lastName\": \"User\",\n  \"sourceSystem\": \"test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/customers",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Validation Error",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"timestamp\": \"2024-01-15T10:30:00Z\",\n  \"status\": 400,\n  \"error\": \"Bad Request\",\n  \"message\": \"Validation failed\",\n  \"details\": {\n    \"email\": \"must not be blank\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Invalid Email Format (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 400\", function() {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"invalid-email\",\n  \"sourceSystem\": \"test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/customers",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Empty Body (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/customers",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Non-Existent Customer (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 404\", function() {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/api/customers/by-email?email=nonexistent@example.com",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "by-email"
+              ],
+              "query": [
+                {
+                  "key": "email",
+                  "value": "nonexistent@example.com"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "06 - Observability",
+      "item": [
+        {
+          "name": "Get All Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/metrics",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "metrics"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Events Processed Metric",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/metrics/mdm.events_processed_total",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "metrics",
+                "mdm.events_processed_total"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Duplicates Detected Metric",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/metrics/mdm.duplicates_detected_total",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "metrics",
+                "mdm.duplicates_detected_total"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Processing Latency Metric",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/metrics/mdm.event_processing_latency_seconds",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "metrics",
+                "mdm.event_processing_latency_seconds"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Golden Records Created Metric",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/metrics/mdm.golden_records_created_total",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "metrics",
+                "mdm.golden_records_created_total"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "07 - SLA/SLO/SLI Testing",
+      "item": [
+        {
+          "name": "Get SLO Status (Complete)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 200\", function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.test(\"Has availability\", function() {",
+                  "    pm.expect(jsonData.availability).to.exist;",
+                  "});",
+                  "pm.test(\"Has error budget\", function() {",
+                  "    pm.expect(jsonData.errorBudgetRemaining).to.exist;",
+                  "});",
+                  "pm.test(\"Has burn rate\", function() {",
+                  "    pm.expect(jsonData.burnRate).to.exist;",
+                  "});",
+                  "pm.test(\"SLO is met\", function() {",
+                  "    pm.expect(jsonData.sloMet).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/slo",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "slo"
+              ]
+            },
+            "description": "Get complete SLO status including availability, error budget, burn rate, and severity level."
+          },
+          "response": [
+            {
+              "name": "SLO Status - Healthy",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"availability\": \"99.9500%\",\n  \"errorBudgetRemaining\": \"67.50%\",\n  \"burnRate\": \"1.20x\",\n  \"burnRateSeverity\": \"NORMAL\",\n  \"burnRateDescription\": \"Normal operations\",\n  \"monthlyErrorBudgetMinutes\": 43.2,\n  \"weeklyErrorBudgetMinutes\": 10.08,\n  \"dailyErrorBudgetMinutes\": 1.44,\n  \"maxAllowedErrorRate\": \"0.1000%\",\n  \"sloMet\": true,\n  \"status\": \"HEALTHY\",\n  \"totalEventsProcessed\": 15420,\n  \"totalErrors\": 8,\n  \"duplicateRate\": \"27.35%\",\n  \"timestamp\": \"2024-01-15T10:30:00Z\",\n  \"sloTarget\": \"99.90%\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get SLO Health (Simple)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/slo/health",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "slo",
+                "health"
+              ]
+            },
+            "description": "Get simplified SLO health status (quick check)."
+          },
+          "response": [
+            {
+              "name": "SLO Health - Healthy",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"availability\": \"99.95%\",\n  \"errorBudget\": \"67.5%\",\n  \"status\": \"HEALTHY\"\n}"
+            },
+            {
+              "name": "SLO Health - Warning",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"availability\": \"99.85%\",\n  \"errorBudget\": \"35.2%\",\n  \"status\": \"WARNING\"\n}"
+            },
+            {
+              "name": "SLO Health - Critical",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"availability\": \"99.70%\",\n  \"errorBudget\": \"8.5%\",\n  \"status\": \"CRITICAL\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Detailed Health (All Indicators)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/health?show-details=always",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ],
+              "query": [
+                {
+                  "key": "show-details",
+                  "value": "always"
+                }
+              ]
+            },
+            "description": "Get detailed health status showing all 5 health indicators: db, kafka, mdmProcessing, liveness, readiness."
+          },
+          "response": [
+            {
+              "name": "All Health Indicators UP",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"status\": \"UP\",\n  \"components\": {\n    \"db\": {\n      \"status\": \"UP\",\n      \"details\": {\n        \"queryTimeMs\": 3,\n        \"rawTableRows\": 1542,\n        \"goldenTableRows\": 892\n      }\n    },\n    \"kafka\": {\n      \"status\": \"UP\",\n      \"details\": {\n        \"produceTimeMs\": 12,\n        \"bootstrapServers\": \"kafka:9092\"\n      }\n    },\n    \"mdmProcessing\": {\n      \"status\": \"UP\",\n      \"details\": {\n        \"lastProcessingTime\": \"2024-01-15T10:30:00Z\",\n        \"totalProcessed\": 1542,\n        \"totalDuplicates\": 423,\n        \"duplicateRate\": \"27%\"\n      }\n    },\n    \"livenessState\": {\n      \"status\": \"UP\"\n    },\n    \"readinessState\": {\n      \"status\": \"UP\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Burn Rate Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/metrics/mdm.processing_errors_total",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "metrics",
+                "mdm.processing_errors_total"
+              ]
+            },
+            "description": "Get error count for burn rate calculation."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Error Budget Calculation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/metrics/mdm.events_processed_total",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "metrics",
+                "mdm.events_processed_total"
+              ]
+            },
+            "description": "Get total events for error budget calculation."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Latency SLI (Histogram)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/metrics/mdm.event_processing_latency_seconds",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "metrics",
+                "mdm.event_processing_latency_seconds"
+              ]
+            },
+            "description": "Get latency histogram for p50/p95/p99 calculation."
+          },
+          "response": [
+            {
+              "name": "Latency Histogram",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"name\": \"mdm.event_processing_latency_seconds\",\n  \"measurements\": [\n    {\"statistic\": \"COUNT\", \"value\": 15420},\n    {\"statistic\": \"TOTAL_TIME\", \"value\": 385.5},\n    {\"statistic\": \"MAX\", \"value\": 0.245}\n  ],\n  \"availableTags\": [\n    {\"tag\": \"service\", \"values\": [\"customer-mastering-service\"]}\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Deduplication Latency SLI",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/metrics/mdm.deduplication_lookup_latency_seconds",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "metrics",
+                "mdm.deduplication_lookup_latency_seconds"
+              ]
+            },
+            "description": "Get deduplication lookup latency (SLO: 99% < 10ms)."
+          },
+          "response": []
+        },
+        {
+          "name": "Calculate: Availability SLI",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://prometheus.io/api/v1/query?query=sum(rate(mdm_events_processed_total[5m]))%20-%20sum(rate(mdm_processing_errors_total[5m]))%20/%20sum(rate(mdm_events_processed_total[5m]))%20*%20100",
+              "protocol": "https",
+              "host": [
+                "prometheus",
+                "io"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "query"
+              ],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "sum(rate(mdm_events_processed_total[5m])) - sum(rate(mdm_processing_errors_total[5m])) / sum(rate(mdm_events_processed_total[5m])) * 100"
+                }
+              ]
+            },
+            "description": "Prometheus query for availability SLI calculation (reference)."
+          },
+          "response": []
+        },
+        {
+          "name": "Verify: SLO Target (99.9%)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/slo",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "slo"
+              ]
+            },
+            "description": "Verify SLO target is configured correctly (99.9% availability)."
+          },
+          "response": [
+            {
+              "name": "SLO Configuration Verified",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"sloTarget\": \"99.90%\",\n  \"availability\": \"99.9500%\",\n  \"sloMet\": true,\n  \"status\": \"HEALTHY\"\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url_ingestion",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "base_url_mastering",
+      "value": "http://localhost:8081",
+      "type": "string"
+    },
+    {
+      "key": "test_customer_email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "test_customer_id",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

@@ -1,0 +1,279 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-mdm
+  namespace: mdm-system
+data:
+  mdm-operations.json: |
+    {
+      "dashboard": {
+        "title": "MDM Operations",
+        "tags": ["mdm", "operations"],
+        "timezone": "browser",
+        "refresh": "10s",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Event Processing Rate",
+            "type": "graph",
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+            "targets": [
+              {
+                "expr": "rate(mdm_events_processed_total[1m])",
+                "legendFormat": "Events/sec",
+                "refId": "A"
+              }
+            ],
+            "yAxes": [
+              {"label": "Events/sec", "min": 0},
+              {"show": false}
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Processing Latency (p50, p95, p99)",
+            "type": "graph",
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.50, rate(mdm_event_processing_latency_seconds_bucket[5m]))",
+                "legendFormat": "p50",
+                "refId": "A"
+              },
+              {
+                "expr": "histogram_quantile(0.95, rate(mdm_event_processing_latency_seconds_bucket[5m]))",
+                "legendFormat": "p95",
+                "refId": "B"
+              },
+              {
+                "expr": "histogram_quantile(0.99, rate(mdm_event_processing_latency_seconds_bucket[5m]))",
+                "legendFormat": "p99",
+                "refId": "C"
+              }
+            ],
+            "yAxes": [
+              {"label": "Seconds", "min": 0, "format": "s"},
+              {"show": false}
+            ],
+            "thresholds": [
+              {"value": 0.1, "color": "yellow", "op": "gt"},
+              {"value": 0.5, "color": "red", "op": "gt"}
+            ]
+          },
+          {
+            "id": 3,
+            "title": "Duplicate Detection Rate",
+            "type": "graph",
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+            "targets": [
+              {
+                "expr": "rate(mdm_duplicates_detected_total[5m]) / rate(mdm_events_processed_total[5m])",
+                "legendFormat": "Duplicate %",
+                "refId": "A"
+              }
+            ],
+            "yAxes": [
+              {"label": "Percentage", "min": 0, "max": 1, "format": "percentunit"},
+              {"show": false}
+            ],
+            "thresholds": [
+              {"value": 0.05, "color": "yellow", "op": "lt"},
+              {"value": 0.3, "color": "yellow", "op": "gt"},
+              {"value": 0.5, "color": "red", "op": "gt"}
+            ]
+          },
+          {
+            "id": 4,
+            "title": "Error Rate",
+            "type": "graph",
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+            "targets": [
+              {
+                "expr": "rate(mdm_processing_errors_total[5m]) / rate(mdm_events_processed_total[5m])",
+                "legendFormat": "Error %",
+                "refId": "A"
+              }
+            ],
+            "yAxes": [
+              {"label": "Percentage", "min": 0, "format": "percentunit"},
+              {"show": false}
+            ],
+            "thresholds": [
+              {"value": 0.001, "color": "yellow", "op": "gt"},
+              {"value": 0.01, "color": "red", "op": "gt"}
+            ]
+          },
+          {
+            "id": 5,
+            "title": "Golden Records Created vs Updated",
+            "type": "graph",
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+            "targets": [
+              {
+                "expr": "rate(mdm_golden_records_created_total[5m])",
+                "legendFormat": "Created/sec",
+                "refId": "A"
+              },
+              {
+                "expr": "rate(mdm_golden_records_updated_total[5m])",
+                "legendFormat": "Updated/sec",
+                "refId": "B"
+              }
+            ],
+            "yAxes": [
+              {"label": "Records/sec", "min": 0},
+              {"show": false}
+            ]
+          },
+          {
+            "id": 6,
+            "title": "Deduplication Lookup Latency",
+            "type": "graph",
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.99, rate(mdm_deduplication_lookup_latency_seconds_bucket[5m]))",
+                "legendFormat": "p99 lookup",
+                "refId": "A"
+              }
+            ],
+            "yAxes": [
+              {"label": "Seconds", "min": 0, "format": "s"},
+              {"show": false}
+            ],
+            "thresholds": [
+              {"value": 0.01, "color": "yellow", "op": "gt"},
+              {"value": 0.05, "color": "red", "op": "gt"}
+            ]
+          }
+        ],
+        "time": {"from": "now-1h", "to": "now"},
+        "version": 1
+      }
+    }
+
+  mdm-slo-compliance.json: |
+    {
+      "dashboard": {
+        "title": "MDM SLO Compliance",
+        "tags": ["mdm", "slo", "compliance"],
+        "timezone": "browser",
+        "refresh": "30s",
+        "panels": [
+          {
+            "id": 1,
+            "title": "SLO-001: Latency Compliance (99% < 100ms)",
+            "type": "stat",
+            "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+            "targets": [
+              {
+                "expr": "sum(rate(mdm_event_processing_latency_seconds_bucket{le=\"0.1\"}[30d])) / sum(rate(mdm_event_processing_latency_seconds_count[30d]))",
+                "legendFormat": "% within SLO",
+                "refId": "A"
+              }
+            ],
+            "thresholds": [
+              {"value": 0.90, "color": "red"},
+              {"value": 0.95, "color": "yellow"},
+              {"value": 0.99, "color": "green"}
+            ],
+            "format": "percentunit",
+            "decimals": 2
+          },
+          {
+            "id": 2,
+            "title": "SLO-002: Availability Compliance (99.9%)",
+            "type": "stat",
+            "gridPos": {"h": 6, "w": 8, "x": 8, "y": 0},
+            "targets": [
+              {
+                "expr": "1 - (sum(rate(mdm_processing_errors_total[30d])) / sum(rate(mdm_events_processed_total[30d])))",
+                "legendFormat": "Availability",
+                "refId": "A"
+              }
+            ],
+            "thresholds": [
+              {"value": 0.95, "color": "red"},
+              {"value": 0.99, "color": "yellow"},
+              {"value": 0.999, "color": "green"}
+            ],
+            "format": "percentunit",
+            "decimals": 3
+          },
+          {
+            "id": 3,
+            "title": "Error Budget Remaining (30-day window)",
+            "type": "gauge",
+            "gridPos": {"h": 6, "w": 8, "x": 16, "y": 0},
+            "targets": [
+              {
+                "expr": "max(0, (0.001 * 30 * 24 * 60 * 60 - sum(increase(mdm_processing_errors_total[30d]))) / (0.001 * 30 * 24 * 60 * 60))",
+                "legendFormat": "Budget",
+                "refId": "A"
+              }
+            ],
+            "thresholds": [
+              {"value": 0, "color": "red"},
+              {"value": 0.25, "color": "yellow"},
+              {"value": 0.5, "color": "green"}
+            ],
+            "format": "percentunit",
+            "decimals": 2
+          },
+          {
+            "id": 4,
+            "title": "Processing Latency Trend (7 days)",
+            "type": "graph",
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 6},
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.50, rate(mdm_event_processing_latency_seconds_bucket[1h]))",
+                "legendFormat": "p50",
+                "refId": "A"
+              },
+              {
+                "expr": "histogram_quantile(0.95, rate(mdm_event_processing_latency_seconds_bucket[1h]))",
+                "legendFormat": "p95",
+                "refId": "B"
+              },
+              {
+                "expr": "histogram_quantile(0.99, rate(mdm_event_processing_latency_seconds_bucket[1h]))",
+                "legendFormat": "p99",
+                "refId": "C"
+              }
+            ],
+            "yAxes": [
+              {"label": "Seconds", "min": 0, "format": "s"},
+              {"show": false}
+            ],
+            "thresholds": [
+              {"value": 0.1, "color": "yellow", "op": "gt", "line": true},
+              {"value": 0.5, "color": "red", "op": "gt", "line": true}
+            ]
+          },
+          {
+            "id": 5,
+            "title": "Error Rate Trend (7 days)",
+            "type": "graph",
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 14},
+            "targets": [
+              {
+                "expr": "rate(mdm_processing_errors_total[5m]) / rate(mdm_events_processed_total[5m])",
+                "legendFormat": "Error %",
+                "refId": "A"
+              }
+            ],
+            "yAxes": [
+              {"label": "Percentage", "min": 0, "format": "percentunit"},
+              {"show": false}
+            ],
+            "thresholds": [
+              {"value": 0.001, "color": "yellow", "op": "gt", "line": true},
+              {"value": 0.01, "color": "red", "op": "gt", "line": true}
+            ]
+          }
+        ],
+        "time": {"from": "now-7d", "to": "now"},
+        "version": 1
+      }
+    }

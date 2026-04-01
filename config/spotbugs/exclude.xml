@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!-- Exclude test files from analysis -->
+    <Match>
+        <Package name="~.*\.test\..*"/>
+    </Match>
+    
+    <!-- Exclude DTO classes -->
+    <Match>
+        <Class name="~.*\.dto\..*"/>
+    </Match>
+    
+    <!-- Exclude entity classes -->
+    <Match>
+        <Class name="~.*\.entity\..*"/>
+    </Match>
+    
+    <!-- Exclude configuration classes -->
+    <Match>
+        <Class name="~.*\.config\..*"/>
+    </Match>
+    
+    <!-- Exclude known false positives -->
+    
+    <!-- EI: May expose internal representation -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+    </Match>
+    
+    <!-- EI2: May expose internal representation -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+    
+    <!-- Se: Serializable class without serialVersionID -->
+    <Match>
+        <Bug pattern="SE_NO_SERIALVERSIONID"/>
+    </Match>
+    
+    <!-- UrF: Unread field -->
+    <Match>
+        <Bug pattern="URF_UNREAD_FIELD"/>
+    </Match>
+    
+    <!-- UuF: Unwritten field -->
+    <Match>
+        <Bug pattern="UUF_UNUSED_FIELD"/>
+    </Match>
+    
+    <!-- NP: Possible null pointer dereference (Lombok generated) -->
+    <Match>
+        <Class name="~.*\$Builder"/>
+        <Bug pattern="NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE"/>
+    </Match>
+    
+    <!-- Allow catch Exception in specific cases -->
+    <Match>
+        <Class name="~.*Listener.*"/>
+        <Bug pattern="REC_CATCH_EXCEPTION"/>
+    </Match>
+    
+    <!-- Allow synchronized methods in Kafka listeners -->
+    <Match>
+        <Class name="~.*Kafka.*"/>
+        <Bug pattern="IS2_INCONSISTENT_SYNC"/>
+    </Match>
+    
+    <!-- Exclude timing-related warnings in metrics -->
+    <Match>
+        <Class name="~.*Metrics.*"/>
+        <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD"/>
+    </Match>
+</FindBugsFilter>

@@ -1,0 +1,98 @@
+services:
+  oauth-server:
+    image: node:20-alpine
+    working_dir: /app
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./oauth-server:/app
+    command: sh -c "npm install && node server.js"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9999/.well-known/openid-configuration"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  kafka:
+    image: apache/kafka:latest
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      CLUSTER_ID: mdm-cluster-id
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: mdm_db
+      POSTGRES_USER: mdm_user
+      POSTGRES_PASSWORD: mdm_password
+    volumes:
+      - ./k8s/db-init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mdm_user -d mdm_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  customer-ingestion-service:
+    build: ./customer-ingestion-service
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      LOG_LEVEL: INFO
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://oauth-server:9999
+    depends_on:
+      oauth-server:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  customer-mastering-service:
+    build: ./customer-mastering-service
+    ports:
+      - "8081:8080"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DATABASE_URL: jdbc:postgresql://postgres:5432/mdm_db
+      DATABASE_USERNAME: mdm_user
+      DATABASE_PASSWORD: mdm_password
+      LOG_LEVEL: INFO
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://oauth-server:9999
+    depends_on:
+      oauth-server:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:

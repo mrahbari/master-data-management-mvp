@@ -1,0 +1,179 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts
+  namespace: mdm-system
+data:
+  mdm-alerts.yml: |
+    groups:
+      - name: mdm-critical
+        interval: 30s
+        rules:
+          # SLO-002: Availability breach - Error rate > 1%
+          - alert: MDMProcessingErrorRateHigh
+            expr: |
+              (
+                sum(rate(mdm_processing_errors_total[5m])) 
+                / 
+                sum(rate(mdm_events_processed_total[5m]))
+              ) > 0.01
+            for: 2m
+            labels:
+              severity: critical
+              slo: "SLO-002"
+              team: backend
+            annotations:
+              summary: "MDM processing error rate > 1%"
+              description: "Error rate is {{ $value | humanizePercentage }} (SLO: < 0.1%)"
+              runbook_url: "https://wiki.internal/mdm/runbooks/error-rate-high"
+              
+          # SLO-001: Latency breach - p99 > 500ms
+          - alert: MDMProcessingLatencyHigh
+            expr: |
+              histogram_quantile(0.99, 
+                rate(mdm_event_processing_latency_seconds_bucket[5m]))
+              > 0.5
+            for: 5m
+            labels:
+              severity: critical
+              slo: "SLO-001"
+              team: backend
+            annotations:
+              summary: "MDM p99 processing latency > 500ms"
+              description: "P99 latency is {{ $value | humanizeDuration }} (SLO: < 100ms)"
+              runbook_url: "https://wiki.internal/mdm/runbooks/latency-high"
+              
+          # Service down
+          - alert: MDMServiceDown
+            expr: |
+              up{job="customer-mastering-service"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              team: platform
+            annotations:
+              summary: "MDM Mastering Service is down"
+              description: "Service has been down for more than 1 minute"
+              
+          # Database down
+          - alert: MDMDatabaseDown
+            expr: |
+              pg_up == 0
+            for: 1m
+            labels:
+              severity: critical
+              team: database
+            annotations:
+              summary: "MDM Database is unreachable"
+              description: "PostgreSQL database is not responding"
+
+      - name: mdm-warnings
+        interval: 1m
+        rules:
+          # SLO-001: Latency degradation - p95 > 100ms
+          - alert: MDMProcessingLatencyDegraded
+            expr: |
+              histogram_quantile(0.95, 
+                rate(mdm_event_processing_latency_seconds_bucket[5m]))
+              > 0.1
+            for: 10m
+            labels:
+              severity: warning
+              slo: "SLO-001"
+              team: backend
+            annotations:
+              summary: "MDM p95 processing latency > 100ms"
+              description: "P95 latency is {{ $value | humanizeDuration }} (SLO: < 100ms)"
+              
+          # Consumer lag > 10,000
+          - alert: MDMConsumerLagHigh
+            expr: |
+              kafka_consumer_lag{group_id="customer-mastering-group"} > 10000
+            for: 5m
+            labels:
+              severity: warning
+              team: backend
+            annotations:
+              summary: "MDM consumer lag is high"
+              description: "Consumer lag is {{ $value }} messages (threshold: 10,000)"
+              
+          # Duplicate rate anomaly (too low)
+          - alert: MDMDuplicateRateAnomalyLow
+            expr: |
+              (
+                rate(mdm_duplicates_detected_total[1h]) / 
+                rate(mdm_events_processed_total[1h])
+              ) < 0.01
+            and
+              rate(mdm_events_processed_total[1h]) > 10
+            for: 1h
+            labels:
+              severity: warning
+              team: data-quality
+            annotations:
+              summary: "MDM duplicate rate unusually low"
+              description: "Duplicate rate is {{ $value | humanizePercentage }} (expected: 5-30%)"
+              
+          # Duplicate rate anomaly (too high)
+          - alert: MDMDuplicateRateAnomalyHigh
+            expr: |
+              (
+                rate(mdm_duplicates_detected_total[1h]) / 
+                rate(mdm_events_processed_total[1h])
+              ) > 0.5
+            for: 1h
+            labels:
+              severity: warning
+              team: data-quality
+            annotations:
+              summary: "MDM duplicate rate unusually high"
+              description: "Duplicate rate is {{ $value | humanizePercentage }} (expected: 5-30%)"
+              
+          # JVM memory pressure
+          - alert: MDMJVMMemoryPressure
+            expr: |
+              jvm_memory_used_bytes{area="heap"} / jvm_memory_max_bytes{area="heap"} > 0.85
+            for: 5m
+            labels:
+              severity: warning
+              team: platform
+            annotations:
+              summary: "MDM JVM memory pressure high"
+              description: "Heap usage is {{ $value | humanizePercentage }}"
+              
+          # Database connection pool exhaustion
+          - alert: MDMDatabasePoolExhaustion
+            expr: |
+              hikaricp_connections_pending > 10
+            for: 2m
+            labels:
+              severity: warning
+              team: database
+            annotations:
+              summary: "MDM database connection pool exhaustion"
+              description: "{{ $value }} connections pending"
+
+      - name: mdm-info
+        interval: 1m
+        rules:
+          # Daily throughput report
+          - alert: MDMDailyThroughputReport
+            expr: |
+              increase(mdm_events_processed_total[24h])
+            for: 0m
+            labels:
+              severity: info
+              team: backend
+            annotations:
+              summary: "MDM 24h throughput: {{ $value | humanize }} events"
+              
+          # Database size report
+          - alert: MDMDatabaseSizeReport
+            expr: |
+              pg_database_size_bytes{datname="mdm_db"}
+            for: 0m
+            labels:
+              severity: info
+              team: database
+            annotations:
+              summary: "MDM database size: {{ $value | humanize1024 }}B"

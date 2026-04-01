@@ -1,0 +1,393 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - '**/*.java'
+      - '**/*.gradle'
+      - '**/*.yml'
+      - '**/*.xml'
+      - '.github/workflows/**'
+  
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - '**/*.java'
+      - '**/*.gradle'
+      - '**/*.yml'
+      - '**/*.xml'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: '21'
+  GRADLE_VERSION: '8.5'
+
+jobs:
+  # ===========================================
+  # Job 1: Code Quality Checks
+  # ===========================================
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+      
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+      
+      - name: Run Checkstyle (Ingestion Service)
+        working-directory: ./customer-ingestion-service
+        run: ./gradlew checkstyleMain checkstyleTest --no-daemon
+      
+      - name: Run Checkstyle (Mastering Service)
+        working-directory: ./customer-mastering-service
+        run: ./gradlew checkstyleMain checkstyleTest --no-daemon
+      
+      - name: Run Spotless Check (Ingestion Service)
+        working-directory: ./customer-ingestion-service
+        run: ./gradlew spotlessCheck --no-daemon
+      
+      - name: Run Spotless Check (Mastering Service)
+        working-directory: ./customer-mastering-service
+        run: ./gradlew spotlessCheck --no-daemon
+      
+      - name: Upload Checkstyle Reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkstyle-reports
+          path: |
+            customer-ingestion-service/build/reports/checkstyle/
+            customer-mastering-service/build/reports/checkstyle/
+          retention-days: 7
+      
+      - name: Upload Spotless Reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotless-reports
+          path: |
+            customer-ingestion-service/build/reports/spotless/
+            customer-mastering-service/build/reports/spotless/
+          retention-days: 7
+
+  # ===========================================
+  # Job 2: Static Analysis (SpotBugs)
+  # ===========================================
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: code-quality
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+      
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+      
+      - name: Run SpotBugs (Ingestion Service)
+        working-directory: ./customer-ingestion-service
+        run: ./gradlew spotbugsMain --no-daemon
+      
+      - name: Run SpotBugs (Mastering Service)
+        working-directory: ./customer-mastering-service
+        run: ./gradlew spotbugsMain --no-daemon
+      
+      - name: Upload SpotBugs Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotbugs-reports
+          path: |
+            customer-ingestion-service/build/reports/spotbugs/
+            customer-mastering-service/build/reports/spotbugs/
+          retention-days: 7
+
+  # ===========================================
+  # Job 3: Unit Tests
+  # ===========================================
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: code-quality
+    
+    services:
+      kafka:
+        image: apache/kafka:3.6.0
+        ports:
+          - 9092:9092
+        env:
+          KAFKA_NODE_ID: 1
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+          CLUSTER_ID: test-cluster-id
+      
+      postgres:
+        image: postgres:15-alpine
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_DB: mdm_test
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+      
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+      
+      - name: Wait for Kafka
+        run: |
+          echo "Waiting for Kafka to be ready..."
+          for i in {1..30}; do
+            if nc -z localhost 9092; then
+              echo "Kafka is ready!"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Kafka failed to start"
+          exit 1
+      
+      - name: Wait for PostgreSQL
+        run: |
+          echo "Waiting for PostgreSQL to be ready..."
+          for i in {1..30}; do
+            if nc -z localhost 5432; then
+              echo "PostgreSQL is ready!"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL failed to start"
+          exit 1
+      
+      - name: Run Tests (Ingestion Service)
+        working-directory: ./customer-ingestion-service
+        run: ./gradlew test --no-daemon
+        env:
+          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+      
+      - name: Run Tests (Mastering Service)
+        working-directory: ./customer-mastering-service
+        run: ./gradlew test --no-daemon
+        env:
+          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+          DATABASE_URL: jdbc:postgresql://localhost:5432/mdm_test
+          DATABASE_USERNAME: test_user
+          DATABASE_PASSWORD: test_password
+      
+      - name: Upload Test Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            customer-ingestion-service/build/reports/tests/
+            customer-mastering-service/build/reports/tests/
+          retention-days: 7
+      
+      - name: Upload JaCoCo Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-reports
+          path: |
+            customer-ingestion-service/build/reports/jacoco/
+            customer-mastering-service/build/reports/jacoco/
+          retention-days: 7
+
+  # ===========================================
+  # Job 4: Build and Package
+  # ===========================================
+  build:
+    name: Build & Package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [static-analysis, unit-tests]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+      
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+      
+      - name: Build JARs
+        working-directory: ./customer-ingestion-service
+        run: ./gradlew bootJar --no-daemon
+      
+      - name: Build JARs
+        working-directory: ./customer-mastering-service
+        run: ./gradlew bootJar --no-daemon
+      
+      - name: Upload JARs
+        uses: actions/upload-artifact@v4
+        with:
+          name: application-jars
+          path: |
+            customer-ingestion-service/build/libs/*.jar
+            customer-mastering-service/build/libs/*.jar
+          retention-days: 7
+      
+      - name: Build Docker Images (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          docker build -t mdm/customer-ingestion-service:pr-${{ github.event.number }} ./customer-ingestion-service
+          docker build -t mdm/customer-mastering-service:pr-${{ github.event.number }} ./customer-mastering-service
+
+  # ===========================================
+  # Job 5: Code Coverage Report
+  # ===========================================
+  code-coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: unit-tests
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download JaCoCo Reports
+        uses: actions/download-artifact@v4
+        with:
+          name: jacoco-reports
+          path: ./jacoco-reports
+      
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./jacoco-reports/**/jacocoTestReport.xml
+          flags: unittests
+          name: codecov-mdm-mvp
+          fail_ci_if_error: false
+          verbose: true
+
+  # ===========================================
+  # Job 6: Security Scan
+  # ===========================================
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+      
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+      
+      - name: Run OWASP Dependency Check
+        working-directory: ./customer-ingestion-service
+        run: ./gradlew dependencyCheckAnalyze --no-daemon
+        continue-on-error: true
+      
+      - name: Run OWASP Dependency Check
+        working-directory: ./customer-mastering-service
+        run: ./gradlew dependencyCheckAnalyze --no-daemon
+        continue-on-error: true
+
+  # ===========================================
+  # Summary Job
+  # ===========================================
+  ci-summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [code-quality, static-analysis, unit-tests, build, code-coverage, security-scan]
+    if: always()
+    
+    steps:
+      - name: Check job statuses
+        run: |
+          echo "Code Quality: ${{ needs.code-quality.result }}"
+          echo "Static Analysis: ${{ needs.static-analysis.result }}"
+          echo "Unit Tests: ${{ needs.unit-tests.result }}"
+          echo "Build: ${{ needs.build.result }}"
+          echo "Code Coverage: ${{ needs.code-coverage.result }}"
+          echo "Security Scan: ${{ needs.security-scan.result }}"
+          
+          if [[ "${{ needs.unit-tests.result }}" == "failure" ]] || \
+             [[ "${{ needs.build.result }}" == "failure" ]] || \
+             [[ "${{ needs.code-quality.result }}" == "failure" ]]; then
+            echo "CI Pipeline FAILED"
+            exit 1
+          else
+            echo "CI Pipeline PASSED"
+          fi

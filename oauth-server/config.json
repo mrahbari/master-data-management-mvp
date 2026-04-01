@@ -1,0 +1,28 @@
+{
+  "clients": [
+    {
+      "client_id": "mdm-client",
+      "client_secret": "mdm-secret",
+      "redirect_uris": ["http://localhost:8080/callback"],
+      "grant_types": ["password", "client_credentials", "refresh_token"],
+      "scope": "openid profile email"
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "password": "admin123",
+      "roles": ["ADMIN", "CUSTOMER_WRITE", "CUSTOMER_READ"]
+    },
+    {
+      "username": "user",
+      "password": "user123",
+      "roles": ["CUSTOMER_WRITE"]
+    },
+    {
+      "username": "readonly",
+      "password": "readonly123",
+      "roles": ["CUSTOMER_READ"]
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "name": "MDM MVP - Local",
+  "values": [
+    {
+      "key": "base_url_ingestion",
+      "value": "http://localhost:8080",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "base_url_mastering",
+      "value": "http://localhost:8081",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "oauth_url",
+      "value": "http://localhost:9999",
+      "type": "default",
+      "enabled": true,
+      "_comment": "OAuth2 server URL - Start with: cd oauth-server && node server.js"
+    },
+    {
+      "key": "oauth_token",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    },
+    {
+      "key": "admin_token",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    },
+    {
+      "key": "user_token",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    },
+    {
+      "key": "readonly_token",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    },
+    {
+      "key": "client_token",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    },
+    {
+      "key": "test_customer_email",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "test_customer_id",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "total_customers",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    }
+  ],
+  "_postman_variable_scope": "environment"
+}

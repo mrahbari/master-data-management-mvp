@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC
+    "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+    "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+
+<suppressions>
+    <!-- Suppress checks for test files -->
+    <suppress checks="Javadoc.*" files="src/test/java/"/>
+    <suppress checks="MissingJavadoc.*" files="src/test/java/"/>
+    <suppress checks="MagicNumber" files="src/test/java/"/>
+    <suppress checks="CyclomaticComplexity" files="src/test/java/"/>
+    
+    <!-- Suppress checks for generated code -->
+    <suppress checks=".*" files=".*[\\/]generated[\\/].*\.java"/>
+    
+    <!-- Allow longer methods in test files -->
+    <suppress checks="MethodLength" files="src/test/java/"/>
+    
+    <!-- Allow TODO comments in specific files -->
+    <suppress checks="TodoComment" files=".*MVP.*\.java"/>
+</suppressions>

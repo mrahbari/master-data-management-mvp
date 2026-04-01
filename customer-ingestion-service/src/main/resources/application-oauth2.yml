@@ -1,0 +1,22 @@
+# OAuth2 / Security Configuration
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # For production: Configure your actual issuer URI
+          # issuer-uri: https://your-auth-server.com
+          issuer-uri: https://mdm-demo.auth0.com/
+          jwk-set-uri: https://mdm-demo.auth0.com/.well-known/jwks.json
+
+# OAuth2 Test Configuration (for local development)
+oauth2:
+  test:
+    enabled: ${OAUTH2_TEST_ENABLED:false}
+    issuer: https://mdm-demo.auth0.com/
+    audience: mdm-api
+
+# Security endpoints
+management:
+  security:
+    enabled: false # Permit all for health/metrics endpoints

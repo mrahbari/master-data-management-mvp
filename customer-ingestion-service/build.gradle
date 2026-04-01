@@ -1,0 +1,206 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.2.0'
+    id 'io.spring.dependency-management' version '1.1.4'
+    id 'checkstyle'
+    id 'com.diffplug.spotless' version '6.22.0'
+    id 'com.github.spotbugs' version '6.0.4'
+    id 'jacoco'
+}
+
+group = 'com.mdm'
+version = '1.0.0'
+
+java {
+    sourceCompatibility = '21'
+    targetCompatibility = '21'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    implementation 'org.springframework.kafka:spring-kafka'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    // Code quality tools
+    checkstyle 'com.puppycrawl.tools:checkstyle:10.12.5'
+    spotbugsPlugins 'com.h3xstream.findsecbugs:findsecbugs-plugin:1.12.0'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+}
+
+// ===========================================
+// CODE QUALITY CONFIGURATION
+// ===========================================
+
+// Checkstyle - Code style enforcement
+checkstyle {
+    toolVersion = '10.12.5'
+    configFile = file('config/checkstyle/checkstyle.xml')
+    ignoreFailures = false
+    maxWarnings = 0
+    maxErrors = 0
+}
+
+checkstyleMain {
+    source = 'src/main/java'
+}
+
+checkstyleTest {
+    source = 'src/test/java'
+}
+
+// Spotless - Code formatting
+spotless {
+    enforceCheck true
+
+    java {
+        target 'src/**/*.java'
+        googleJavaFormat('1.19.2')
+        removeUnusedImports()
+        trimTrailingWhitespace()
+        endWithNewline()
+
+        // License header
+        licenseHeader '''/*
+ * Copyright © $YEAR. All rights reserved.
+ * This code is for demonstration purposes only.
+ */
+'''
+
+        // Import order
+        importOrder(
+            'java',
+            'javax',
+            'org',
+            'com',
+            '',
+            '\\#java',
+            '\\#javax',
+            '\\#org',
+            '\\#com'
+        )
+    }
+
+    format 'misc', {
+        target '*.gradle', '*.md', '.gitignore'
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+
+    yaml {
+        target 'src/**/*.yml'
+        prettier()
+    }
+}
+
+// SpotBugs - Static analysis for bugs
+spotbugs {
+    ignoreFailures = false
+    showStackTraces = true
+    showProgress = true
+
+    // Exclude filter for known false positives
+    excludeFilter = file('config/spotbugs/exclude.xml')
+}
+
+spotbugsMain {
+    reports {
+        html {
+            required = true
+            outputLocation = file("$buildDir/reports/spotbugs/main/spotbugs.html")
+        }
+    }
+}
+
+spotbugsTest {
+    enabled = false
+}
+
+// JaCoCo - Code coverage
+jacoco {
+    toolVersion = '0.8.11'
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                '**/dto/**',
+                '**/entity/**',
+                '**/config/**',
+                '**/*Application.*',
+                '**/exception/**'
+            ])
+        }))
+    }
+}
+
+jacocoTestCoverageVerification {
+    dependsOn jacocoTestReport
+
+    violationRules {
+        rule {
+            limit {
+                minimum = 0.7
+            }
+        }
+
+        rule {
+            element = 'CLASS'
+            excludes = [
+                '*.dto.*',
+                '*.entity.*',
+                '*.config.*',
+                '*Application',
+                '*.exception.*'
+            ]
+            limit {
+                counter = 'LINE'
+                value = 'COVEREDRATIO'
+                minimum = 0.5
+            }
+        }
+    }
+}
+
+// Custom tasks
+tasks.register('codeQuality') {
+    group = 'Verification'
+    description = 'Runs all code quality checks'
+    dependsOn checkstyleMain, checkstyleTest, spotlessCheck, spotbugsMain, jacocoTestCoverageVerification
+}
+
+tasks.register('formatCode') {
+    group = 'Formatting'
+    description = 'Formats all code according to style guidelines'
+    dependsOn spotlessApply
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+    finalizedBy jacocoTestCoverageVerification
+}
+
+tasks.named('build') {
+    dependsOn codeQuality
+}
