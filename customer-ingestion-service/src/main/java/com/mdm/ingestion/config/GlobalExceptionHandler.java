@@ -19,9 +19,7 @@ import com.mdm.ingestion.exception.ConcurrentProcessingException;
 import com.mdm.ingestion.exception.KafkaPublishException;
 import com.mdm.ingestion.validator.CustomerRequestValidator.ValidationException;
 
-import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -107,14 +105,8 @@ public class GlobalExceptionHandler {
     return ResponseEntity.internalServerError().body(response);
   }
 
-  @Getter
   @Builder
-  @AllArgsConstructor
-  public static class ErrorResponse {
-    private final Instant timestamp;
-    private final int status;
-    private final String error;
-    private final String message;
-    private final Map<String, String> details;
+  public record ErrorResponse(Instant timestamp, int status, String error, String message,
+                                Map<String, String> details) {
   }
 }

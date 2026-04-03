@@ -17,6 +17,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mdm.ingestion.dto.CustomerIngestionRequest;
+import com.mdm.ingestion.exception.ConcurrentProcessingException;
 import com.mdm.ingestion.service.CustomerKafkaProducer;
 import com.mdm.ingestion.service.IngestionUseCaseService;
 import com.mdm.ingestion.service.IngestionUseCaseService.IngestionResponse;
@@ -158,9 +159,7 @@ class CustomerIngestionControllerTest {
   @DisplayName("Should return 409 Conflict when request is still processing")
   void shouldReturnConflictWhenProcessing() throws Exception {
     when(ingestionService.ingest(any(), any()))
-        .thenThrow(
-            new com.mdm.ingestion.service.IngestionUseCaseService.ConcurrentProcessingException(
-                "test-key"));
+        .thenThrow(new ConcurrentProcessingException("test-key"));
 
     mockMvc
         .perform(

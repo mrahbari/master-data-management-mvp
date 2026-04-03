@@ -4,7 +4,10 @@
  */
 package com.mdm.ingestion.exception;
 
+import lombok.Getter;
+
 /** Thrown when a Kafka publish operation fails (HTTP 500). */
+@Getter
 public final class KafkaPublishException extends IngestionDomainException {
 
   private final String eventId;
@@ -18,15 +21,7 @@ public final class KafkaPublishException extends IngestionDomainException {
     this.keyHash = keyHash;
   }
 
-  public String getEventId() {
-    return eventId;
-  }
-
-  public String getKeyHash() {
-    return keyHash;
-  }
-
-  private static String maskKey(String key) {
+    private static String maskKey(String key) {
     if (key == null || key.length() <= 8) {
       return "***";
     }

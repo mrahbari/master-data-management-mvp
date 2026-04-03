@@ -5,6 +5,7 @@
 package com.mdm.ingestion.service;
 
 import com.mdm.ingestion.dto.CustomerIngestionRequest;
+import com.mdm.ingestion.util.InputSanitizer;
 import com.mdm.ingestion.validator.CustomerRequestValidator;
 import org.springframework.stereotype.Component;
 
@@ -39,10 +40,7 @@ public final class IngestionInputSanitizer {
   }
 
   private String sanitizeNationalId(String nationalId) {
-    if (nationalId == null) {
-      return null;
-    }
-    return nationalId.trim().replaceAll("[^a-zA-Z0-9]", "");
+      return InputSanitizer.normalizeNationalId(nationalId);
   }
 
   private String sanitizeSourceSystem(String sourceSystem) {

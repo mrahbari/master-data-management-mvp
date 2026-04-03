@@ -10,6 +10,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.Instant;
@@ -35,9 +36,9 @@ import lombok.NoArgsConstructor;
 @Table(
     name = "ingestion_idempotency_keys",
     indexes = {
-        @java.persistence.Index(name = "idx_idempotency_key_hash", columnList = "key_hash", unique = true),
-        @java.persistence.Index(name = "idx_idempotency_client_key", columnList = "client_idempotency_key"),
-        @java.persistence.Index(name = "idx_idempotency_expires_at", columnList = "expires_at")
+        @Index(name = "idx_idempotency_key_hash", columnList = "key_hash", unique = true),
+        @Index(name = "idx_idempotency_client_key", columnList = "client_idempotency_key"),
+        @Index(name = "idx_idempotency_expires_at", columnList = "expires_at")
     })
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
