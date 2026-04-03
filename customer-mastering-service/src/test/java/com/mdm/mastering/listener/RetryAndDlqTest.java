@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.mdm.mastering.dto.CustomerRawEvent;
-import com.mdm.mastering.dto.DlqEvent;
+import com.mdm.mastering.dto.dlq.DlqEvent;
 import com.mdm.mastering.exception.ClassifiedException;
 import com.mdm.mastering.exception.ErrorType;
 import com.mdm.mastering.metrics.RetryAndDlqMetrics;

@@ -7,7 +7,7 @@ package com.mdm.mastering.listener;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mdm.mastering.dto.CustomerRawEvent;
-import com.mdm.mastering.dto.DlqEvent;
+import com.mdm.mastering.dto.dlq.DlqEvent;
 import com.mdm.mastering.entity.CustomerRawEntity;
 import com.mdm.mastering.exception.ClassifiedException;
 import com.mdm.mastering.exception.ErrorType;

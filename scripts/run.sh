@@ -93,35 +93,49 @@ show_menu() {
 run_docker_compose() {
     print_status "Starting MDM MVP with Docker Compose..."
     echo ""
-    
+
     cd "$PROJECT_DIR"
-    
+
     # Check if docker-compose.yml exists
     if [ ! -f "docker-compose.yml" ]; then
         print_error "docker-compose.yml not found!"
         exit 1
     fi
-    
-    print_status "Building and starting services..."
-    
+
     # Try docker compose (v2) first, fall back to docker-compose (v1)
+    local compose_cmd=""
     if docker compose version &> /dev/null; then
-        docker compose up --build -d
+        compose_cmd="docker compose"
     else
-        docker-compose up --build -d
+        compose_cmd="docker-compose"
     fi
-    
+
+    # Attempt to start services. If network mismatch error occurs, recreate.
+    OUTPUT=$($compose_cmd up --build -d 2>&1)
+    EXIT_CODE=$?
+
+    if [ $EXIT_CODE -ne 0 ] && echo "$OUTPUT" | grep -q "needs to be recreated"; then
+        print_warning "Docker network configuration changed. Recreating network..."
+        $compose_cmd down --remove-orphans
+        print_status "Starting services with fresh network..."
+        $compose_cmd up --build -d
+    elif [ $EXIT_CODE -ne 0 ]; then
+        print_error "Failed to start services:"
+        echo "$OUTPUT"
+        exit 1
+    fi
+
     echo ""
     print_success "Services starting in background..."
     echo ""
     print_status "Waiting for services to be healthy (this may take 1-2 minutes)..."
-    
+
     # Wait for services
     sleep 10
-    
+
     # Check health
     check_docker_health
-    
+
     echo ""
     print_status "View logs with: docker-compose logs -f"
     print_status "Stop services with: ./scripts/stop.sh or docker-compose down"

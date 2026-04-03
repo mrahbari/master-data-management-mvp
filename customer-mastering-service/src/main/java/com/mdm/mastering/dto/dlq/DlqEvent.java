@@ -2,9 +2,8 @@
  * Copyright © 2026. All rights reserved.
  * This code is for demonstration purposes only.
  */
-package com.mdm.mastering.dto;
+package com.mdm.mastering.dto.dlq;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.AllArgsConstructor;
@@ -25,28 +24,8 @@ import lombok.NoArgsConstructor;
 public class DlqEvent {
 
   private Object originalEvent;
-  private ErrorDetails errorDetails;
+  private DlqErrorDetails errorDetails;
   @Builder.Default
   private List<ProcessingHistoryEntry> processingHistory = new ArrayList<>();
   private String schemaVersion;
-
-  @Getter
-  @Builder
-  @NoArgsConstructor
-  @AllArgsConstructor
-  public static class ErrorDetails {
-    private String exception;
-    private String message;
-    private String stackTrace;
-  }
-
-  @Getter
-  @Builder
-  @NoArgsConstructor
-  @AllArgsConstructor
-  public static class ProcessingHistoryEntry {
-    private int attempt;
-    private Instant timestamp;
-    private String error;
-  }
 }

@@ -5,7 +5,9 @@
 package com.mdm.mastering.service;
 
 import com.mdm.mastering.dto.CustomerRawEvent;
-import com.mdm.mastering.dto.DlqEvent;
+import com.mdm.mastering.dto.dlq.DlqErrorDetails;
+import com.mdm.mastering.dto.dlq.DlqEvent;
+import com.mdm.mastering.dto.dlq.ProcessingHistoryEntry;
 import com.mdm.mastering.exception.ClassifiedException;
 import com.mdm.mastering.exception.ErrorType;
 import java.io.PrintWriter;
@@ -47,19 +49,19 @@ public class DlqMessageFormatter {
     String exceptionClassName = exception.getClass().getSimpleName();
     String errorMessage = exception.getMessage();
 
-    DlqEvent.ErrorDetails errorDetails = DlqEvent.ErrorDetails.builder()
+    DlqErrorDetails errorDetails = DlqErrorDetails.builder()
         .exception(exceptionClassName)
         .message(truncate(errorMessage, 500))
         .stackTrace(stackTrace)
         .build();
 
-    DlqEvent.ProcessingHistoryEntry historyEntry = DlqEvent.ProcessingHistoryEntry.builder()
+    ProcessingHistoryEntry historyEntry = ProcessingHistoryEntry.builder()
         .attempt(retryCount)
         .timestamp(Instant.now())
         .error(truncate(errorMessage, 200))
         .build();
 
-    List<DlqEvent.ProcessingHistoryEntry> history = new ArrayList<>();
+    List<ProcessingHistoryEntry> history = new ArrayList<>();
     history.add(historyEntry);
 
     return DlqEvent.builder()
