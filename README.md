@@ -1,4 +1,4 @@
-# MDM MVP - Customer Deduplication & Golden Record
+# MDM MVP - Customer Master Data Management
 
 ## 1. Problem Definition
 
@@ -6,12 +6,12 @@
 **Master Data Management (MDM)** is a technology framework that creates and maintains a single, authoritative source of truth for critical business data (customers, products, etc.) across an organization.
 
 ### Problem This MVP Solves
-In fintech environments, customer data arrives from multiple channels (web, mobile, partners) leading to:
+In fintech environments, customer data arrives from multiple channels (web, mobile, partners, banks, government registries) leading to:
 - **Duplicate records** (same customer, different representations)
 - **Inconsistent data** across systems
 - **No single view** of the customer
 
-This MVP solves: **Detecting duplicate customer records and creating a unified "Golden Record"** stored in PostgreSQL, using event-driven architecture.
+This MVP solves: **Detecting duplicate customer records and creating a unified "Golden Record"** stored in PostgreSQL, using event-driven architecture with **nationalId** as the canonical unique identifier.
 
 ---
 
@@ -32,147 +32,203 @@ This MVP solves: **Detecting duplicate customer records and creating a unified "
 │  │         │            │         │               │                  │  │
 │  │         ▼            │         │               ▼                  │  │
 │  │  ┌────────────────┐  │         │  ┌────────────────────────────┐  │  │
-│  │  │ Kafka Producer │  │         │  │   Deduplication Service    │  │  │
-│  │  │ (raw events)   │  │         │  │   - Email match            │  │  │
-│  │  └────────────────┘  │         │  │   - Normalization          │  │  │
-│  │                      │         │  └────────────┬───────────────┘  │  │
-│  └──────────────────────┘         │               │                  │  │
-│                                   │               ▼                  │  │
-│                                   │  ┌────────────────────────────┐  │  │
-│                                   │  │   Golden Record Service    │  │  │
-│                                   │  │   - Create/Update Master   │  │  │
-│                                   │  └────────────┬───────────────┘  │  │
-│                                   │               │                  │  │
-│                                   │               ▼                  │  │
-│                                   │  ┌────────────────────────────┐  │  │
-│                                   │  │   PostgreSQL               │  │  │
-│                                   │  │   - customer_raw           │  │  │
-│                                   │  │   - customer_golden        │  │  │
-│                                   │  └────────────────────────────┘  │  │
-│                                   │                                  │  │
+│  │  │ Idempotency    │  │         │  │   Golden Record Service    │  │  │
+│  │  │ Service        │  │         │  │   - nationalId dedup       │  │  │
+│  │  │ (dual-key)     │  │         │  │   - Create/Update Master   │  │  │
+│  │  └────────────────┘  │         │  └────────────┬───────────────┘  │  │
+│  │         │            │         │               │                  │  │
+│  │         ▼            │         │               ▼                  │  │
+│  │  ┌────────────────┐  │         │  ┌────────────────────────────┐  │  │
+│  │  │ Kafka Producer │  │         │  │   PostgreSQL               │  │  │
+│  │  │ key=nationalId │  │         │  │   - customer_raw           │  │  │
+│  │  └────────────────┘  │         │  │   - customer_golden        │  │  │
+│  │                      │         │  └────────────────────────────┘  │  │
+│  └──────────────────────┘         │                                  │  │
 │                                   └──────────────────────────────────┘  │
 │                                                                          │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │                         Kafka (KRaft)                            │   │
 │  │   Topics: customer.raw, customer.mastered                        │   │
+│  │   Partition key: nationalId (per-customer ordering)              │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Components:**
-- **2 Microservices**: Ingestion + Mastering
-- **Kafka (KRaft mode)**: Event backbone (no Zookeeper)
+- **2 Microservices**: Ingestion (command side) + Mastering (query side)
+- **Kafka (KRaft mode)**: Event backbone with per-customer partition ordering
 - **PostgreSQL**: Persistent storage for raw + golden records
 - **Kubernetes**: Orchestration platform
 
 ---
 
-## 3. Data Flow (Step-by-Step)
+## 3. Canonical Unique Key: nationalId
+
+### Why nationalId?
+The **nationalId** serves as the single source of truth for customer identity throughout the entire system:
+
+| Layer | How nationalId Is Used |
+|---|---|
+| **REST API Input** | Required field, validated (12-13 alphanumeric chars) |
+| **Input Sanitization** | Normalized: strip non-alphanumeric characters |
+| **Idempotency** | Part of deterministic SHA-256 key: `SHA-256(normalizedNationalId|sourceSystem)` |
+| **Kafka Partition Key** | `nationalId.toLowerCase().trim()` → same customer → same partition → ordering guaranteed |
+| **Event Payload** | Stored in `CustomerRawEvent.nationalId` |
+| **Golden Record Lookup** | `customer_golden.national_id` unique constraint (O(1) lookup) |
+| **Database Index** | `idx_customer_golden_national_id` on golden table |
+
+### Benefits
+- **Deterministic deduplication**: Same nationalId + sourceSystem → same idempotency hash
+- **Per-customer ordering**: Kafka partition key = nationalId guarantees events for the same customer are processed in order
+- **Simplified matching**: No fuzzy email matching needed; nationalId is the authoritative identifier
+- **Privacy**: SHA-256 hash stored in idempotency table, not raw nationalId
+
+---
+
+## 4. Data Flow (Step-by-Step)
 
 ```
-Step 1: REST API Call
+Step 1: REST API Call (with optional X-Idempotency-Key header)
    POST /api/customers
-   Body: { "email": "John.Doe@Example.com", "firstName": " john ", ... }
+   Body: { "nationalId": "123456789012", "name": "John Doe", "email": "...", ... }
         │
         ▼
 Step 2: Customer Ingestion Service
-   - Validates basic structure
-   - Publishes to Kafka: customer.raw
-   - Returns 202 Accepted immediately (async processing)
+   - Sanitize & validate inputs (IngestionInputSanitizer)
+   - Resolve idempotency: dual-key strategy
+     • Client-provided key (X-Idempotency-Key header) — if present
+     • Deterministic key: SHA-256(nationalId|sourceSystem) — always checked
+   - If HIT → return 200 OK with cached eventId
+   - If MISS → continue
         │
         ▼
-Step 3: Kafka Topic (customer.raw)
-   - Event stored with key: email (normalized)
-   - Partitioned by email hash
+Step 3: Build Event & Publish to Kafka
+   - Build CustomerRawEvent (nationalId, name, email, phone, sourceSystem, timestamp)
+   - Kafka key = nationalId.toLowerCase().trim() (partition key)
+   - Topic: customer.raw (3 partitions)
+   - Headers: X-Event-ID, X-Idempotency-Key, X-Source-System, X-Timestamp, X-Event-Version
+   - Mark idempotency key as COMPLETED
+   - Return 202 Accepted
         │
         ▼
-Step 4: Customer Mastering Service (Consumer)
-   - Consumes event from customer.raw
-   - Increments: processed_events_total
+Step 4: Kafka Topic (customer.raw)
+   - Event routed to partition based on nationalId hash
+   - All events for same nationalId → same partition → strict ordering
         │
         ▼
-Step 5: Deduplication Service
-   - Normalize email: lowercase, trim → "john.doe@example.com"
-   - Query DB: SELECT * FROM customer_golden WHERE normalized_email = ?
+Step 5: Customer Mastering Service (Consumer)
+   - Consume event from customer.raw
+   - Idempotency: skip if event_id already stored
+   - Store raw event in customer_raw (audit trail)
+   - Lookup by nationalId: SELECT * FROM customer_golden WHERE national_id = ?
         │
         ├─▶ NO MATCH → Create new golden record
         │       │
         │       ▼
-        │   Step 6a: Insert into customer_golden
-        │   Step 7a: Publish to customer.mastered (action: CREATED)
+        │   Insert into customer_golden
+        │   Publish to customer.mastered (action: CREATED)
         │
-        └─▶ MATCH FOUND → Update existing
+        └─▶ MATCH FOUND → Update existing golden record
                 │
                 ▼
-            Step 6b: Update customer_golden (merge strategy)
-            Step 7b: Publish to customer.mastered (action: UPDATED)
-                │
-                ▼
-            Step 8: Increment duplicates_detected_total (if duplicate)
+            Merge fields (coalesce strategy)
+            Publish to customer.mastered (action: UPDATED)
 ```
 
 ---
 
-## 4. Data Model (PostgreSQL)
+## 5. Idempotency Design
+
+### Dual-Key Strategy
+
+```
+Client Request
+  │
+  ├── X-Idempotency-Key header? ──YES──▶ Check by client key
+  │                                            │
+  │                                     Found? ──YES──▶ Check status
+  │                                     │               │
+  │                                     │               ├── COMPLETED → HIT (return cached)
+  │                                     │               ├── PROCESSING → 409 Conflict
+  │                                     │               └── EXPIRED → treat as new
+  │                                     │
+  │                                     NO
+  │                                      │
+  NO                                     ▼
+  │                               Check deterministic key
+  │                               SHA-256(nationalId|sourceSystem)
+  │                                    │
+  │                             Found? ──YES──▶ Same status check as above
+  │                             NO
+  │                              │
+  └──────────────────────────────▼
+                          Insert new record (PROCESSING)
+                          Atomic: ON CONFLICT (key_hash) DO NOTHING
+```
+
+### TTL Configuration
+| Key Type | Default TTL | Purpose |
+|----------|-------------|---------|
+| Client-provided (`X-Idempotency-Key`) | 24 hours | Client controls retry semantics |
+| Auto-generated (deterministic) | 6 hours | Payload-based deduplication |
+
+### Database Schema (Idempotency)
+```sql
+CREATE TABLE ingestion_idempotency_keys (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key_hash                VARCHAR(64) NOT NULL UNIQUE,     -- SHA-256 hash
+    client_idempotency_key  VARCHAR(255),                     -- Optional client key
+    event_id                UUID NOT NULL,
+    status                  VARCHAR(20) NOT NULL,             -- PROCESSING / COMPLETED
+    created_at              TIMESTAMPTZ NOT NULL,
+    expires_at              TIMESTAMPTZ NOT NULL
+);
+```
+
+---
+
+## 6. Data Model (PostgreSQL)
 
 ```sql
 -- Raw customer events (immutable audit trail)
 CREATE TABLE customer_raw (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_id        UUID NOT NULL UNIQUE,
-    email           VARCHAR(255) NOT NULL,
-    first_name      VARCHAR(100),
-    last_name       VARCHAR(100),
-    phone           VARCHAR(20),
+    national_id     VARCHAR(64) NOT NULL,
+    name            VARCHAR(255),
+    email           VARCHAR(255),
+    phone           VARCHAR(64),
     source_system   VARCHAR(50) NOT NULL,
     raw_payload     JSONB NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_customer_raw_email ON customer_raw(email);
+CREATE INDEX idx_customer_raw_national_id ON customer_raw(national_id);
+CREATE INDEX idx_customer_raw_event_id ON customer_raw(event_id);
 CREATE INDEX idx_customer_raw_created ON customer_raw(created_at);
 
 -- Golden record (single source of truth)
 CREATE TABLE customer_golden (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    normalized_email    VARCHAR(255) NOT NULL UNIQUE,
-    email               VARCHAR(255) NOT NULL,
-    first_name          VARCHAR(100),
-    last_name           VARCHAR(100),
-    phone               VARCHAR(20),
-    
-    -- Trust scoring (simple MVP version)
+    national_id         VARCHAR(64) NOT NULL UNIQUE,
+    name                VARCHAR(255),
+    email               VARCHAR(255),
+    phone               VARCHAR(64),
     confidence_score    SMALLINT NOT NULL DEFAULT 100,
-    
-    -- Audit
     version             BIGINT NOT NULL DEFAULT 1,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_source_system  VARCHAR(50)
 );
 
-CREATE INDEX idx_customer_golden_email ON customer_golden(normalized_email);
+CREATE INDEX idx_customer_golden_national_id ON customer_golden(national_id);
 CREATE INDEX idx_customer_golden_updated ON customer_golden(updated_at);
-
--- Optional: Outbox pattern for reliable event publishing
-CREATE TABLE outbox_events (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    aggregate_type  VARCHAR(50) NOT NULL,
-    aggregate_id    UUID NOT NULL,
-    event_type      VARCHAR(100) NOT NULL,
-    payload         JSONB NOT NULL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    processed       BOOLEAN NOT NULL DEFAULT FALSE
-);
-
-CREATE INDEX idx_outbox_events_processed ON outbox_events(processed) 
-    WHERE processed = FALSE;
 ```
 
 ---
 
-## 5. Kafka Design
+## 7. Kafka Design
 
 ### Topics
 
@@ -183,30 +239,27 @@ CREATE INDEX idx_outbox_events_processed ON outbox_events(processed)
 
 ### Key Strategy
 ```
-Key: normalized_email (e.g., "john.doe@example.com")
+Partition Key: nationalId.toLowerCase().trim()
 
 Why?
 - Ensures same customer always goes to same partition
-- Maintains ordering for deduplication logic
-- Enables idempotent processing
+- Maintains strict ordering for deduplication logic
+- Enables idempotent processing per customer
+- Scales horizontally by adding partitions
 ```
 
-### Partitioning Reasoning
-- **3 partitions**: Balance between parallelism and ordering guarantees
-- **Keyed by email**: All events for a customer processed in order
-- **Scalability**: Can increase partitions later if needed
-
-### Idempotency Approach
-```java
-// Consumer stores processed event_id in DB
-// On reprocess: check if event_id already handled
-INSERT INTO customer_raw (event_id, ...)
-ON CONFLICT (event_id) DO NOTHING;  -- Skip duplicates
-```
+### Event Headers
+| Header | Purpose |
+|--------|---------|
+| `X-Event-ID` | Unique event UUID |
+| `X-Idempotency-Key` | SHA-256 deterministic key |
+| `X-Source-System` | Originating system (CRM, BANK, WEB, MOBILE, etc.) |
+| `X-Timestamp` | Ingestion timestamp |
+| `X-Event-Version` | Schema version for evolution |
 
 ---
 
-## 6. Implementation (Spring Boot)
+## 8. Implementation (Spring Boot 3.2 / Java 21)
 
 ### Customer Ingestion Service Structure
 ```
@@ -214,16 +267,39 @@ customer-ingestion-service/
 ├── src/main/java/com/mdm/ingestion/
 │   ├── CustomerIngestionServiceApplication.java
 │   ├── controller/
-│   │   └── CustomerIngestionController.java    # POST /api/customers
+│   │   └── CustomerIngestionController.java       # POST /api/customers
 │   ├── dto/
-│   │   ├── CustomerIngestionRequest.java       # Request DTO
-│   │   └── CustomerRawEvent.java               # Kafka event
+│   │   ├── CustomerIngestionRequest.java          # Request DTO
+│   │   └── CustomerRawEvent.java                  # Kafka event (immutable)
+│   ├── entity/
+│   │   └── IdempotencyKey.java                    # JPA entity (factory methods)
+│   ├── repository/
+│   │   └── IdempotencyKeyRepository.java          # Atomic upsert
 │   ├── service/
-│   │   └── CustomerKafkaProducer.java          # Kafka producer
+│   │   ├── IngestionUseCaseService.java           # Orchestrator
+│   │   ├── IngestionInputSanitizer.java           # Input normalization + validation
+│   │   ├── IngestionEventBuilder.java             # Event construction
+│   │   ├── IdempotencyService.java                # Dual-key idempotency
+│   │   └── CustomerKafkaProducer.java             # Kafka publishing
+│   ├── exception/
+│   │   ├── IngestionDomainException.java          # Base domain exception
+│   │   ├── ConcurrentProcessingException.java     # HTTP 409
+│   │   └── KafkaPublishException.java             # HTTP 500
+│   ├── util/
+│   │   ├── IdempotencyKeyGenerator.java           # SHA-256 key generation
+│   │   ├── InputSanitizer.java                    # Static sanitization utilities
+│   │   └── TimeConfig.java                        # Clock injection
+│   ├── validator/
+│   │   └── CustomerRequestValidator.java          # Field validators
 │   └── config/
-│       └── KafkaConfig.java                    # Topic creation
+│       ├── GlobalExceptionHandler.java
+│       ├── KafkaConfig.java
+│       └── OAuth2SecurityConfig.java
 └── src/main/resources/
-    └── application.yml
+    ├── application.yml
+    └── db/migration/
+        ├── V1__create_idempotency_keys_table.sql
+        └── V2__add_client_idempotency_key.sql
 ```
 
 ### Customer Mastering Service Structure
@@ -231,100 +307,105 @@ customer-ingestion-service/
 customer-mastering-service/
 ├── src/main/java/com/mdm/mastering/
 │   ├── CustomerMasteringServiceApplication.java
-│   ├── listener/
-│   │   └── CustomerRawEventListener.java       # Kafka consumer
+│   ├── controller/
+│   │   └── CustomerQueryController.java           # GET /api/customers/*
 │   ├── dto/
-│   │   ├── CustomerRawEvent.java
-│   │   └── CustomerMasteredEvent.java
+│   │   ├── CustomerRawEvent.java                  # Kafka consumer DTO
+│   │   ├── CustomerMasteredEvent.java             # Produced event
+│   │   └── CustomerQueryResponse.java             # Read model DTO
 │   ├── entity/
-│   │   ├── CustomerRawEntity.java
-│   │   └── CustomerGoldenEntity.java
+│   │   ├── CustomerRawEntity.java                 # Raw event JPA entity
+│   │   └── CustomerGoldenEntity.java              # Golden record JPA entity
 │   ├── repository/
-│   │   ├── CustomerRawRepository.java
-│   │   └── CustomerGoldenRepository.java
+│   │   ├── CustomerRawRepository.java             # Raw event storage
+│   │   └── CustomerGoldenRepository.java          # Golden record CRUD
 │   ├── service/
-│   │   ├── DeduplicationService.java           # Email normalization
-│   │   ├── GoldenRecordService.java            # Core MDM logic
-│   │   └── CustomerMasteredEventProducer.java  # Publish mastered events
+│   │   ├── GoldenRecordService.java               # Core dedup + merge logic
+│   │   ├── CustomerQueryService.java              # Read-side queries
+│   │   ├── CustomerMasteredEventProducer.java     # Kafka producer
+│   │   ├── DeduplicationService.java              # Utility (preserved)
+│   │   ├── CustomerMatchingService.java           # Fuzzy matching interface (Phase 2)
+│   │   └── SurvivableMatchingServiceImpl.java     # Fuzzy matching impl (Phase 2)
+│   ├── listener/
+│   │   └── CustomerRawEventListener.java          # Kafka consumer
+│   ├── health/
+│   │   ├── DatabaseHealthIndicator.java
+│   │   ├── KafkaHealthIndicator.java
+│   │   └── MdmProcessingHealthIndicator.java
+│   ├── metrics/
+│   │   ├── MdmSliMetrics.java
+│   │   └── BurnRateCalculator.java
+│   ├── endpoint/
+│   │   └── SloEndpoint.java
 │   └── config/
-│       └── KafkaConfig.java
+│       ├── KafkaConfig.java
+│       ├── KafkaConsumerConfig.java
+│       └── ObservabilityConfig.java
 └── src/main/resources/
     └── application.yml
 ```
 
+### SOLID Principles Applied
+
+| Principle | Implementation |
+|-----------|---------------|
+| **Single Responsibility** | Each service/component has one reason to change: `IngestionInputSanitizer` (input), `IngestionEventBuilder` (events), `IdempotencyService` (idempotency), `CustomerKafkaProducer` (Kafka) |
+| **Open/Closed** | `IdempotencyResult` sealed interface with 4 permitted types; new result types can be added without modifying existing code |
+| **Liskov Substitution** | Proper `equals()`/`hashCode()` on JPA entities based on business keys |
+| **Interface Segregation** | Entities have no public setters; state mutations via domain methods (`markCompleted()`, `markFailed()`) |
+| **Dependency Inversion** | `Clock` injected for testability; services depend on repository interfaces |
+
 ---
 
-## 7. Deduplication Logic (MVP)
+## 9. Deduplication Logic
 
-### Approach
+### Primary Strategy: nationalId Exact Match
+
 ```java
-public String normalizeEmail(String email) {
-    if (email == null || email.isBlank()) return null;
-    return email.trim().toLowerCase();
-}
+// GoldenRecordService.java
+String nationalId = normalizeNationalId(event.getNationalId());
+var existing = goldenRepository.findByNationalId(nationalId);
 
-// Deduplication check:
-Optional<CustomerGoldenEntity> existing = 
-    goldenRepository.findByNormalizedEmail(normalizedEmail);
+if (existing.isPresent()) {
+    // Update existing golden record (merge)
+} else {
+    // Create new golden record
+}
 ```
 
-### Matching Rules
-| Rule | Implementation | Complexity |
-|------|----------------|------------|
-| Email exact match | `normalized_email` unique constraint | O(1) via index |
-| Normalization | `trim() + toLowerCase()` | O(n) |
-| Name similarity | Optional: string comparison | O(n) |
+### Merge Strategy (Coalesce)
+| Field | Strategy |
+|-------|----------|
+| `nationalId` | Immutable (never changes) |
+| `name` | Coalesce: keep existing if new is null |
+| `email` | Coalesce: keep existing if new is null |
+| `phone` | Coalesce: keep existing if new is null |
+| `sourceSystem` | Always update (track last source) |
+| `version` | Incremented (optimistic locking) |
 
-### Documented Limitations
-1. **Gmail dots**: `john.doe@gmail.com` ≠ `johndoe@gmail.com`
-2. **Plus aliases**: `john+spam@example.com` treated as different email
-3. **Typos**: `gnail.com` vs `gmail.com` not detected
-4. **Case sensitivity**: Only ASCII lowercase handled
-
-**Why these limitations are acceptable for MVP:**
-- Covers 90%+ of real-world duplicates
-- Can be extended later without architecture changes
-- Keeps latency low (<10ms per lookup)
+### Future: Survivable Matching (Phase 2)
+The `SurvivableMatchingServiceImpl` is preserved for future use when advanced fuzzy matching is needed:
+- Email similarity (Levenshtein distance)
+- Name phonetic matching (Soundex)
+- Nickname mapping (50+ variants)
+- Phone number normalization
+- Combined weighted scoring
 
 ---
 
-## 8. Kubernetes Deployment
+## 10. Kubernetes Deployment
 
 ### Manifests Overview
 | File | Purpose |
 |------|---------|
-| `namespace.yaml` | Isolated `mdm-system` namespace |
-| `configmap.yaml` | Non-sensitive config (Kafka URLs) |
-| `secrets.yaml` | Database credentials |
-| `customer-ingestion-deployment.yaml` | 2 replicas + Service |
-| `customer-mastering-deployment.yaml` | 2 replicas + Service |
-| `postgres-deployment.yaml` | Stateful database |
-| `kafka-deployment.yaml` | KRaft mode (no Zookeeper) |
-
-### Key Design Decisions
-```yaml
-# Resource limits (right-sized for MVP)
-resources:
-  requests:
-    memory: "256Mi"
-    cpu: "100m"
-  limits:
-    memory: "512Mi"
-    cpu: "500m"
-
-# Health checks
-livenessProbe:
-  httpGet:
-    path: /actuator/health/liveness
-    port: 8080
-  initialDelaySeconds: 30
-
-# Graceful shutdown
-lifecycle:
-  preStop:
-    exec:
-      command: ["sh", "-c", "sleep 10"]
-```
+| `k8s/namespace.yaml` | Isolated `mdm-system` namespace |
+| `k8s/configmap.yaml` | Non-sensitive config (Kafka URLs) |
+| `k8s/secrets.yaml` | Database credentials |
+| `k8s/customer-ingestion-deployment.yaml` | 2 replicas + Service |
+| `k8s/customer-mastering-deployment.yaml` | 2 replicas + Service |
+| `k8s/postgres-deployment.yaml` | Stateful database |
+| `k8s/kafka-deployment.yaml` | KRaft mode (no Zookeeper) |
+| `k8s/db-init.sql` | Database schema initialization |
 
 ### Deploy Commands
 ```bash
@@ -337,178 +418,132 @@ kubectl apply -f k8s/secrets.yaml
 kubectl apply -f k8s/postgres-deployment.yaml
 kubectl apply -f k8s/kafka-deployment.yaml
 
+# Initialize database
+kubectl exec -n mdm-system postgres-pod -- psql -U mdm_user -d mdm_db -f /docker-entrypoint-initdb.d/db-init.sql
+
 # Deploy services
 kubectl apply -f k8s/customer-ingestion-deployment.yaml
 kubectl apply -f k8s/customer-mastering-deployment.yaml
-
-# Verify
-kubectl get pods -n mdm-system
-kubectl get services -n mdm-system
 ```
 
 ---
 
-## 9. Observability (Lite but Real)
+## 11. Observability
 
 ### Prometheus Metrics
 
-| Metric Name | Type | Description | Labels |
-|-------------|------|-------------|--------|
-| `processed_events_total` | Counter | Total raw events processed | `application` |
-| `duplicates_detected_total` | Counter | Duplicate customers found | `application` |
-| `golden_records_created_total` | Counter | New golden records | `application` |
-| `golden_records_updated_total` | Counter | Updated golden records | `application` |
-| `failed_events_total` | Counter | Processing failures | `application` |
+| Metric | Type | Description |
+|--------|------|-------------|
+| `processed_events_total` | Counter | Total raw events processed |
+| `duplicates_detected_total` | Counter | Duplicate customers found |
+| `golden_records_created_total` | Counter | New golden records |
+| `golden_records_updated_total` | Counter | Updated golden records |
+| `failed_events_total` | Counter | Processing failures |
 
-### Sample Prometheus Query
-```promql
-# Duplicate rate (last 5 minutes)
-rate(duplicates_detected_total[5m])
-
-# Success rate
-rate(processed_events_total[5m]) / 
-(rate(processed_events_total[5m]) + rate(failed_events_total[5m]))
-```
-
-### Grafana Dashboard (JSON snippet)
-```json
-{
-  "panels": [
-    {
-      "title": "Events Processed",
-      "targets": [{"expr": "rate(processed_events_total[5m])"}]
-    },
-    {
-      "title": "Duplicates Detected",
-      "targets": [{"expr": "rate(duplicates_detected_total[5m])"}]
-    }
-  ]
-}
-```
-
-### Structured Logging Strategy
-```java
-// Key log patterns (JSON in production)
-log.info("Received customer ingestion request: eventId={}, email={}, source={}", 
-         eventId, request.getEmail(), request.getSourceSystem());
-
-log.info("Duplicate detected: email={}, eventId={}, goldenRecordId={}", 
-         normalizedEmail, event.getEventId(), existing.get().getId());
-
-log.error("Failed to process event: eventId={}, error={}", 
-          event.getEventId(), ex.getMessage(), ex);
-```
-
-**Log fields for correlation:**
-- `eventId` - Unique event identifier
-- `goldenRecordId` - Master record ID
-- `traceId` - Distributed tracing (if using Sleuth/Micrometer)
+### Health Indicators
+- **Database**: Connection pool status
+- **Kafka**: Broker connectivity
+- **MDM Processing**: Processing error rate
 
 ---
 
-## 10. Failure Handling
-
-### Kafka Retry Strategy
-```yaml
-# Consumer configuration
-spring.kafka.consumer:
-  max-poll-records: 100
-  auto-offset-reset: earliest
-  
-# In production: add Dead Letter Queue
-spring.kafka.listener:
-  ack-mode: manual
-  retry:
-    max-attempts: 3
-    backoff:
-      initial-interval: 1000
-      max-interval: 10000
-      multiplier: 2.0
-```
+## 12. Failure Handling
 
 ### Idempotent Consumer Pattern
 ```java
 @KafkaListener(topics = "${kafka.topics.customer-raw}")
 public void listen(CustomerRawEvent event, Acknowledgment ack) {
-    // Check if already processed (idempotency)
+    // Skip if already processed
     if (rawRepository.existsByEventId(event.getEventId())) {
-        log.warn("Event already processed (idempotent skip): eventId={}", 
-                 event.getEventId());
         ack.acknowledge();
         return;
     }
-    
-    try {
-        // Process event
-        goldenRecordService.processCustomerEvent(event);
-        ack.acknowledge();  // Commit offset after success
-    } catch (Exception ex) {
-        // Don't acknowledge - Kafka will retry
-        // After max retries: send to DLQ
-        throw ex;
-    }
+    // Process...
+    ack.acknowledge();
 }
 ```
 
-### Database Failure Scenarios
-
-| Scenario | Behavior | Recovery |
-|----------|----------|----------|
-| DB connection lost | Exception thrown, offset NOT committed | Kafka retries after reconnection |
-| Unique constraint violation | Event skipped (already processed) | Idempotent - safe to skip |
-| Deadlock | Transaction rolled back | Kafka retry with backoff |
-| Disk full | Exception, offset NOT committed | Alert + manual intervention |
-
-### Circuit Breaker (Optional Extension)
-```java
-// Add Resilience4j for production
-@CircuitBreaker(name = "database", fallbackMethod = "fallback")
-@Transactional
-public void processCustomerEvent(CustomerRawEvent event) {
-    // ... processing logic
-}
+### Idempotency Key Lifecycle
+```
+NEW → PROCESSING → COMPLETED (success)
+                → COMPLETED (failure — prevents reprocessing same payload)
+                → EXPIRED (after TTL — allows retry)
 ```
 
 ---
 
-## 11. Summary
+## 13. API Reference
+
+### Ingestion (Command Side)
+
+```bash
+# POST /api/customers
+# Auth: CUSTOMER_WRITE or ADMIN role
+curl -X POST http://localhost:8080/api/customers \
+  -H "Content-Type: application/json" \
+  -H "X-Idempotency-Key: optional-client-key" \
+  -d '{
+    "nationalId": "123456789012",
+    "name": "John Doe",
+    "email": "john.doe@example.com",
+    "phone": "+1-555-123-4567",
+    "sourceSystem": "web-portal"
+  }'
+
+# Response 202 Accepted (new):
+#   { "eventId": "uuid", "status": "ACCEPTED" }
+#   Header: X-Event-ID: uuid
+
+# Response 200 OK (cached):
+#   { "eventId": "uuid", "status": "CACHED" }
+#   Header: X-Idempotency-Replay: true
+
+# Response 409 Conflict (still processing)
+# Response 400 Bad Request (validation error)
+```
+
+### Query (Read Side)
+
+```bash
+# GET /api/customers — List with pagination
+# GET /api/customers/{id} — By ID
+# GET /api/customers/by-national-id?nationalId=123456789012 — By national ID
+# GET /api/customers/search?name=John — Search by name
+# GET /api/customers/exists?nationalId=123456789012 — Existence check
+# GET /api/customers/count — Total count
+```
+
+---
+
+## 14. Summary
 
 ### Architecture Overview
-> "I designed a two-service MDM system using event-driven architecture. 
-> The **Customer Ingestion Service** receives REST requests and publishes raw events to Kafka. 
-> The **Customer Mastering Service** consumes these events, performs deduplication based on normalized email, and maintains a golden record in PostgreSQL. 
+> "I designed a two-service MDM system using event-driven architecture.
+> The **Customer Ingestion Service** receives REST requests, resolves idempotency via a dual-key strategy (client-provided + SHA-256 deterministic), and publishes events to Kafka partitioned by **nationalId**.
+> The **Customer Mastering Service** consumes these events, deduplicates by **nationalId**, and maintains a golden record in PostgreSQL.
 > All changes are published back to Kafka for downstream systems."
 
 ### Key Design Decisions
-> "**Why Kafka?** It provides durability, replayability, and loose coupling. If the mastering service goes down, events are preserved.
+> "**Why nationalId?** It's the most reliable unique identifier for customers in a fintech context. Email-based deduplication is error-prone (typos, aliases, shared emails). NationalId provides deterministic, unambiguous identification.
+>
+> **Why Kafka?** It provides durability, replayability, and loose coupling. If the mastering service goes down, events are preserved. Partitioning by nationalId ensures per-customer ordering.
 >
 > **Why async processing?** The REST API returns 202 Accepted immediately, allowing the system to handle traffic spikes without blocking users.
 >
-> **Why email-based partitioning?** All events for the same customer go to the same partition, ensuring ordering for deduplication logic.
->
-> **Why two tables?** `customer_raw` provides an immutable audit trail; `customer_golden` is the single source of truth."
+> **Why dual-key idempotency?** Clients sometimes send `X-Idempotency-Key` and sometimes don't. The deterministic key (`SHA-256(nationalId|sourceSystem)`) ensures the same payload is never duplicated regardless."
 
 ### Trade-offs
-> "**What I simplified:** Email deduplication is basic (no Gmail dot handling, no typo detection). This covers 90% of cases and can be extended later.
+> "**What I simplified:** Single-field deduplication (nationalId exact match). This covers the primary use case and can be extended with fuzzy matching later.
 >
-> **What I didn't include:** 
-    1. ML for survivable rules and final trained pattern. rule-based matching over ML because for now! 
-    2. No Saga pattern, no complex orchestration. The system is eventually consistent, which is acceptable for customer data.
+> **What I didn't include:**
+> 1. No Saga pattern, no complex orchestration. The system is eventually consistent, which is acceptable for customer data.
+> 2. No ML-enhanced matching yet — rule-based exact match for now.
 >
 > **Scalability:** Services are stateless and can scale horizontally. Kafka partitions can increase if needed."
 
-### Why This MVP Works
-> "This design demonstrates:
-> - **Microservices patterns**: REST, event-driven communication, async processing
-> - **Data consistency**: Idempotent consumers, optimistic locking
-> - **Production readiness**: Health checks, metrics, structured logging, graceful shutdown
-> - **Kubernetes**: Proper resource limits, probes, config management
->
-> It's simple enough to explain in 10 minutes but realistic enough to show senior-level thinking."
-
 ---
 
-## 12. 🗺️ Roadmap: From MVP to Production
+## 15. 🗺️ Roadmap: From MVP to Production
 
 See **[ROADMAP.md](docs/ROADMAP.md)** for the complete implementation plan.
 
@@ -519,105 +554,68 @@ See **[ROADMAP.md](docs/ROADMAP.md)** for the complete implementation plan.
 | **Architecture** | CQRS pattern (Command/Query separation) | ✅ Complete |
 | **Architecture** | Event-driven with Kafka | ✅ Complete |
 | **Data Flow** | Async processing with 202 Accepted | ✅ Complete |
-| **Deduplication** | Email normalization + exact match | ✅ Complete |
-| **Matching** | 5 Survivable Matching Rules (basic) | ✅ Complete |
+| **Identity** | nationalId as canonical unique key | ✅ Complete |
+| **Deduplication** | nationalId exact match | ✅ Complete |
+| **Idempotency** | Dual-key strategy (client + deterministic SHA-256) | ✅ Complete |
+| **Ordering** | Kafka partition key = nationalId | ✅ Complete |
 | **Storage** | PostgreSQL with raw + golden tables | ✅ Complete |
 | **Observability** | Health indicators (DB, Kafka, Processing) | ✅ Complete |
 | **Observability** | Prometheus metrics + SLI/SLO tracking | ✅ Complete |
 | **Security** | OAuth2 Resource Server with JWT | ✅ Complete |
+| **Code Quality** | SOLID principles, immutable entities, domain methods | ✅ Complete |
 | **Deployment** | Docker Compose + Kubernetes manifests | ✅ Complete |
 | **CI/CD** | GitHub Actions workflow | ✅ Complete |
 
 ### Implementation Phases
 
 #### Phase 1: Reliability & Resilience (Next 2-4 Weeks)
-- **Saga Pattern** - Distributed transaction management with compensation
-- **DLQ Error Handling** - Dead Letter Queue for poison messages
-- **Outbox Pattern** - Reliable event publishing with atomic commits
+- **DLQ Error Handling** — Dead Letter Queue for poison messages
+- **Outbox Pattern** — Reliable event publishing with atomic commits
 
 #### Phase 2: Advanced Matching (Next 4-8 Weeks)
-- **ML-Enhanced Matching** - Hybrid rules + machine learning model
-- **Human-in-the-Loop** - Manual review queue for low-confidence matches
-- **Confidence Scoring** - Probabilistic match scoring
+- **Survivable Matching** — Enable fuzzy matching (email similarity, phonetic names, nicknames)
+- **Human-in-the-Loop** — Manual review queue for low-confidence matches
+- **Confidence Scoring** — Probabilistic match scoring
 
 #### Phase 3: Scalability & Performance (Next 8-12 Weeks)
-- **Consumer Group Scaling** - Kubernetes HPA based on Kafka lag
-- **Redis Caching** - Cache hot records for faster deduplication
-- **Batch Processing** - Optimized bulk operations
+- **Consumer Group Scaling** — Kubernetes HPA based on Kafka lag
+- **Redis Caching** — Cache hot records for faster deduplication
+- **Batch Processing** — Optimized bulk operations
 
 #### Phase 4: Enterprise Features (Next 12-16 Weeks)
-- **Data Quality Scoring** - Completeness, accuracy, consistency metrics
-- **Audit Trail** - Full compliance audit logging
-- **GDPR Compliance** - Right to erasure, data portability
-
-### Success Metrics
-
-| Metric | Current | Target | Timeline |
-|--------|---------|--------|----------|
-| Duplicate Detection Rate | ~85% | >95% | Phase 2 |
-| False Positive Rate | ~5% | <1% | Phase 2 |
-| Processing Latency (p99) | <100ms | <50ms | Phase 3 |
-| System Availability | 99% | 99.9% | Phase 1 |
-| DLQ Rate | N/A | <0.1% | Phase 1 |
+- **Data Quality Scoring** — Completeness, accuracy, consistency metrics
+- **Audit Trail** — Full compliance audit logging
+- **GDPR Compliance** — Right to erasure, data portability
 
 ---
 
 ## Appendix: Quick Reference
 
-### API Example
+### Build Commands
 ```bash
-# Ingest a customer
-curl -X POST http://localhost:8080/api/customers \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "John.Doe@Example.com",
-    "firstName": " john ",
-    "lastName": "Doe ",
-    "phone": "+1-555-123-4567",
-    "sourceSystem": "web-portal"
-  }'
+# Compile both services
+./gradlew :customer-ingestion-service:compileJava :customer-mastering-service:compileJava
 
-# Response: 202 Accepted (async processing)
+# Build all (includes code quality checks)
+./gradlew fullBuild
+
+# Run all tests
+./gradlew fullTest
+
+# Code quality checks
+./gradlew fullCodeQuality
+
+# Format code
+./gradlew :customer-ingestion-service:formatCode :customer-mastering-service:formatCode
+```
+
+### Local Testing (Docker Compose)
+```bash
+docker-compose up -d kafka postgres
+# Then run services locally or build Docker images
 ```
 
 ### Metrics Endpoint
 ```bash
-# Prometheus scrape target
 curl http://localhost:8080/actuator/prometheus
-
-# Sample output:
-# HELP processed_events_total Total number of customer raw events processed
-# TYPE processed_events_total counter
-# processed_events_total{application="customer-mastering-service",} 1542.0
-```
-
-### Local Testing (Docker Compose)
-```yaml
-# docker-compose.yml
-version: '3.8'
-services:
-  kafka:
-    image: apache/kafka:latest
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      CLUSTER_ID: mdm-cluster-id
-
-  postgres:
-    image: postgres:15-alpine
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_DB: mdm_db
-      POSTGRES_USER: mdm_user
-      POSTGRES_PASSWORD: mdm_password
 ```

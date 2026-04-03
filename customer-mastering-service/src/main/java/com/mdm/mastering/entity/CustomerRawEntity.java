@@ -10,12 +10,12 @@ import java.util.UUID;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
 @Table(name = "customer_raw")
-@Data
+@Getter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
@@ -26,12 +26,12 @@ public class CustomerRawEntity {
   @Column(name = "event_id", unique = true, nullable = false)
   private UUID eventId;
 
-  @Column(nullable = false)
+  @Column(name = "national_id", nullable = false)
+  private String nationalId;
+
+  private String name;
+
   private String email;
-
-  private String firstName;
-
-  private String lastName;
 
   private String phone;
 

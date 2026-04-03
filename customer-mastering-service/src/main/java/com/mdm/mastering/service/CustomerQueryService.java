@@ -4,16 +4,14 @@
  */
 package com.mdm.mastering.service;
 
+import com.mdm.mastering.dto.CustomerQueryResponse;
+import com.mdm.mastering.entity.CustomerGoldenEntity;
+import com.mdm.mastering.repository.CustomerGoldenRepository;
 import java.util.UUID;
-
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import com.mdm.mastering.dto.CustomerQueryResponse;
-import com.mdm.mastering.entity.CustomerGoldenEntity;
-import com.mdm.mastering.repository.CustomerGoldenRepository;
 
 /**
  * Customer Query Service (Read Side of CQRS).
@@ -21,9 +19,13 @@ import com.mdm.mastering.repository.CustomerGoldenRepository;
  * <p>This service handles all read operations for customer data. It reads from the golden record
  * table which is optimized for queries.
  *
- * <p>CQRS Benefits: - Separate read and write models - Read model optimized for queries
- * (denormalized) - Write model optimized for consistency (normalized) - Independent scaling of read
- * and write operations
+ * <p>CQRS Benefits:
+ * <ul>
+ *   <li>Separate read and write models</li>
+ *   <li>Read model optimized for queries (denormalized)</li>
+ *   <li>Write model optimized for consistency (normalized)</li>
+ *   <li>Independent scaling of read and write operations</li>
+ * </ul>
  */
 @Service
 @Transactional(readOnly = true)
@@ -37,9 +39,6 @@ public class CustomerQueryService {
 
   /**
    * Get all customers with pagination.
-   *
-   * @param pageable Pagination parameters
-   * @return Page of customer query responses
    */
   public Page<CustomerQueryResponse> getAllCustomers(Pageable pageable) {
     return goldenRepository.findAll(pageable).map(this::toQueryResponse);
@@ -47,9 +46,6 @@ public class CustomerQueryService {
 
   /**
    * Get customer by ID.
-   *
-   * @param id Customer golden record ID
-   * @return Customer query response
    */
   public CustomerQueryResponse getCustomerById(UUID id) {
     CustomerGoldenEntity entity =
@@ -58,52 +54,36 @@ public class CustomerQueryService {
   }
 
   /**
-   * Get customer by email.
-   *
-   * @param email Customer email (case-insensitive)
-   * @return Customer query response
+   * Get customer by nationalId.
    */
-  public CustomerQueryResponse getCustomerByEmail(String email) {
-    String normalizedEmail = email.trim().toLowerCase();
+  public CustomerQueryResponse getCustomerByNationalId(String nationalId) {
+    String normalizedId = normalizeNationalId(nationalId);
     CustomerGoldenEntity entity =
         goldenRepository
-            .findByNormalizedEmail(normalizedEmail)
-            .orElseThrow(() -> new CustomerNotFoundException(email));
+            .findByNationalId(normalizedId)
+            .orElseThrow(() -> new CustomerNotFoundException(nationalId));
     return toQueryResponse(entity);
   }
 
   /**
    * Search customers by name.
-   *
-   * @param firstName First name (partial match)
-   * @param lastName Last name (partial match)
-   * @param pageable Pagination parameters
-   * @return Page of matching customers
    */
   public Page<CustomerQueryResponse> searchByName(
-      String firstName, String lastName, Pageable pageable) {
-    // Simple search implementation - fetch and filter in memory
-    // For production: Use Elasticsearch or database full-text search
+      String name, Pageable pageable) {
     Page<CustomerGoldenEntity> entityPage = goldenRepository.findAll(pageable);
-
     return entityPage.map(this::toQueryResponse);
   }
 
   /**
-   * Check if customer exists by email.
-   *
-   * @param email Customer email
-   * @return true if customer exists
+   * Check if customer exists by nationalId.
    */
-  public boolean existsByEmail(String email) {
-    String normalizedEmail = email.trim().toLowerCase();
-    return goldenRepository.existsByNormalizedEmail(normalizedEmail);
+  public boolean existsByNationalId(String nationalId) {
+    String normalizedId = normalizeNationalId(nationalId);
+    return goldenRepository.existsByNationalId(normalizedId);
   }
 
   /**
    * Get total customer count.
-   *
-   * @return Total number of golden records
    */
   public long getTotalCustomerCount() {
     return goldenRepository.count();
@@ -113,9 +93,9 @@ public class CustomerQueryService {
   private CustomerQueryResponse toQueryResponse(CustomerGoldenEntity entity) {
     return CustomerQueryResponse.builder()
         .id(entity.getId())
+        .nationalId(entity.getNationalId())
+        .name(entity.getName())
         .email(entity.getEmail())
-        .firstName(entity.getFirstName())
-        .lastName(entity.getLastName())
         .phone(entity.getPhone())
         .confidenceScore(entity.getConfidenceScore())
         .version(entity.getVersion())
@@ -123,6 +103,13 @@ public class CustomerQueryService {
         .updatedAt(entity.getUpdatedAt())
         .lastSourceSystem(entity.getLastSourceSystem())
         .build();
+  }
+
+  private static String normalizeNationalId(String nationalId) {
+    if (nationalId == null) {
+      return null;
+    }
+    return nationalId.trim().replaceAll("[^a-zA-Z0-9]", "");
   }
 
   /** Exception thrown when customer is not found. */

@@ -15,7 +15,7 @@ import com.mdm.mastering.entity.CustomerGoldenEntity;
 @Repository
 public interface CustomerGoldenRepository extends JpaRepository<CustomerGoldenEntity, UUID> {
 
-  Optional<CustomerGoldenEntity> findByNormalizedEmail(String normalizedEmail);
+  Optional<CustomerGoldenEntity> findByNationalId(String nationalId);
 
-  boolean existsByNormalizedEmail(String normalizedEmail);
+  boolean existsByNationalId(String nationalId);
 }

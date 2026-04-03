@@ -4,10 +4,11 @@
  */
 package com.mdm.mastering.controller;
 
+import com.mdm.mastering.dto.CustomerQueryResponse;
+import com.mdm.mastering.service.CustomerQueryService;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -19,17 +20,17 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.mdm.mastering.dto.CustomerQueryResponse;
-import com.mdm.mastering.service.CustomerQueryService;
-
 /**
  * Customer Query Controller (Read Side of CQRS).
  *
  * <p>This controller handles all read/query operations for customer data. It uses the
  * CustomerQueryService to fetch data from the golden record table.
  *
- * <p>CQRS Pattern: - Command Side: Customer Ingestion Service (writes to Kafka) - Query Side: This
- * controller (reads from PostgreSQL)
+ * <p>CQRS Pattern:
+ * <ul>
+ *   <li>Command Side: Customer Ingestion Service (writes to Kafka)</li>
+ *   <li>Query Side: This controller (reads from PostgreSQL)</li>
+ * </ul>
  */
 @RestController
 @RequestMapping("/api/customers")
@@ -45,11 +46,6 @@ public class CustomerQueryController {
    * Get all customers with pagination.
    *
    * <p>GET /api/customers?page=0&size=20&sort=updatedAt,desc
-   *
-   * @param page Page number (0-indexed)
-   * @param size Page size
-   * @param sort Sort field and direction
-   * @return Page of customers
    */
   @GetMapping
   public ResponseEntity<Page<CustomerQueryResponse>> getAllCustomers(
@@ -74,9 +70,6 @@ public class CustomerQueryController {
    * Get customer by ID.
    *
    * <p>GET /api/customers/{id}
-   *
-   * @param id Customer golden record ID
-   * @return Customer details
    */
   @GetMapping("/{id}")
   public ResponseEntity<CustomerQueryResponse> getCustomerById(@PathVariable UUID id) {
@@ -85,57 +78,45 @@ public class CustomerQueryController {
   }
 
   /**
-   * Get customer by email.
+   * Get customer by national ID.
    *
-   * <p>GET /api/customers/by-email?email=john@example.com
-   *
-   * @param email Customer email (case-insensitive)
-   * @return Customer details
+   * <p>GET /api/customers/by-national-id?nationalId=123456789012
    */
-  @GetMapping("/by-email")
-  public ResponseEntity<CustomerQueryResponse> getCustomerByEmail(@RequestParam String email) {
-    CustomerQueryResponse customer = queryService.getCustomerByEmail(email);
+  @GetMapping("/by-national-id")
+  public ResponseEntity<CustomerQueryResponse> getCustomerByNationalId(
+      @RequestParam String nationalId) {
+    CustomerQueryResponse customer = queryService.getCustomerByNationalId(nationalId);
     return ResponseEntity.ok(customer);
   }
 
   /**
    * Search customers by name.
    *
-   * <p>GET /api/customers/search?firstName=John&lastName=Doe&page=0&size=20
-   *
-   * @param firstName First name (partial match)
-   * @param lastName Last name (partial match)
-   * @param page Page number
-   * @param size Page size
-   * @return Page of matching customers
+   * <p>GET /api/customers/search?name=John&page=0&size=20
    */
   @GetMapping("/search")
   public ResponseEntity<Page<CustomerQueryResponse>> searchCustomers(
-      @RequestParam(required = false) String firstName,
-      @RequestParam(required = false) String lastName,
+      @RequestParam(required = false) String name,
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "20") int size) {
 
     Pageable pageable = PageRequest.of(page, size);
-    Page<CustomerQueryResponse> customers =
-        queryService.searchByName(firstName, lastName, pageable);
+    Page<CustomerQueryResponse> customers = queryService.searchByName(name, pageable);
     return ResponseEntity.ok(customers);
   }
 
   /**
-   * Check if customer exists by email.
+   * Check if customer exists by national ID.
    *
-   * <p>GET /api/customers/exists?email=john@example.com
-   *
-   * @param email Customer email
-   * @return Existence check result
+   * <p>GET /api/customers/exists?nationalId=123456789012
    */
   @GetMapping("/exists")
-  public ResponseEntity<Map<String, Object>> checkCustomerExists(@RequestParam String email) {
-    boolean exists = queryService.existsByEmail(email);
+  public ResponseEntity<Map<String, Object>> checkCustomerExists(
+      @RequestParam String nationalId) {
+    boolean exists = queryService.existsByNationalId(nationalId);
 
     Map<String, Object> response = new HashMap<>();
-    response.put("email", email);
+    response.put("nationalId", nationalId);
     response.put("exists", exists);
 
     return ResponseEntity.ok(response);
@@ -145,8 +126,6 @@ public class CustomerQueryController {
    * Get total customer count.
    *
    * <p>GET /api/customers/count
-   *
-   * @return Total customer count
    */
   @GetMapping("/count")
   public ResponseEntity<Map<String, Object>> getCustomerCount() {

@@ -6,13 +6,12 @@ package com.mdm.mastering.dto;
 
 import java.time.Instant;
 import java.util.UUID;
-
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-@Data
+@Getter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
@@ -20,9 +19,9 @@ public class CustomerMasteredEvent {
 
   private UUID eventId;
   private UUID goldenRecordId;
+  private String nationalId;
+  private String name;
   private String email;
-  private String firstName;
-  private String lastName;
   private String phone;
   private MasteringAction action;
   private Instant timestamp;

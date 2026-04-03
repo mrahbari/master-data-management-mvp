@@ -10,12 +10,14 @@ import java.util.UUID;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 @Entity
 @Table(name = "customer_golden")
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
@@ -23,15 +25,12 @@ public class CustomerGoldenEntity {
 
   @Id private UUID id;
 
-  @Column(name = "normalized_email", unique = true, nullable = false)
-  private String normalizedEmail;
+  @Column(name = "national_id", unique = true, nullable = false)
+  private String nationalId;
 
-  @Column(nullable = false)
+  private String name;
+
   private String email;
-
-  private String firstName;
-
-  private String lastName;
 
   private String phone;
 

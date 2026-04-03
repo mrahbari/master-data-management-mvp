@@ -4,21 +4,20 @@
  */
 package com.mdm.mastering.listener;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mdm.mastering.dto.CustomerRawEvent;
+import com.mdm.mastering.entity.CustomerRawEntity;
+import com.mdm.mastering.repository.CustomerRawRepository;
+import com.mdm.mastering.service.GoldenRecordService;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
-
-import com.mdm.mastering.dto.CustomerRawEvent;
-import com.mdm.mastering.entity.CustomerRawEntity;
-import com.mdm.mastering.repository.CustomerRawRepository;
-import com.mdm.mastering.service.GoldenRecordService;
-
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
 
 @Component
 public class CustomerRawEventListener {
@@ -27,6 +26,7 @@ public class CustomerRawEventListener {
 
   private final CustomerRawRepository rawRepository;
   private final GoldenRecordService goldenRecordService;
+  private final ObjectMapper objectMapper;
 
   // Metrics
   private final Counter processedEventsCounter;
@@ -35,9 +35,11 @@ public class CustomerRawEventListener {
   public CustomerRawEventListener(
       CustomerRawRepository rawRepository,
       GoldenRecordService goldenRecordService,
-      MeterRegistry meterRegistry) {
+      MeterRegistry meterRegistry,
+      ObjectMapper objectMapper) {
     this.rawRepository = rawRepository;
     this.goldenRecordService = goldenRecordService;
+    this.objectMapper = objectMapper;
 
     this.processedEventsCounter =
         Counter.builder("processed_events_total")
@@ -55,9 +57,9 @@ public class CustomerRawEventListener {
       groupId = "${spring.kafka.consumer.group-id}")
   public void listen(CustomerRawEvent event, Acknowledgment ack) {
     log.info(
-        "Received raw customer event: eventId={}, email={}, source={}",
+        "Received raw customer event: eventId={}, nationalId={}, source={}",
         event.getEventId(),
-        event.getEmail(),
+        maskNationalId(event.getNationalId()),
         event.getSourceSystem());
 
     try {
@@ -73,9 +75,9 @@ public class CustomerRawEventListener {
           CustomerRawEntity.builder()
               .id(java.util.UUID.randomUUID())
               .eventId(event.getEventId())
+              .nationalId(event.getNationalId())
+              .name(event.getName())
               .email(event.getEmail())
-              .firstName(event.getFirstName())
-              .lastName(event.getLastName())
               .phone(event.getPhone())
               .sourceSystem(event.getSourceSystem())
               .rawPayload(toJson(event))
@@ -105,14 +107,18 @@ public class CustomerRawEventListener {
   }
 
   private String toJson(CustomerRawEvent event) {
-    // Simple JSON serialization (use Jackson in production)
-    return String.format(
-        "{\"eventId\":\"%s\",\"email\":\"%s\",\"firstName\":\"%s\",\"lastName\":\"%s\",\"phone\":\"%s\",\"sourceSystem\":\"%s\"}",
-        event.getEventId(),
-        event.getEmail(),
-        event.getFirstName(),
-        event.getLastName(),
-        event.getPhone(),
-        event.getSourceSystem());
+    try {
+      return objectMapper.writeValueAsString(event);
+    } catch (JsonProcessingException e) {
+      log.warn("Failed to serialize event to JSON: eventId={}", event.getEventId(), e);
+      return "{}";
+    }
+  }
+
+  private static String maskNationalId(String nationalId) {
+    if (nationalId == null || nationalId.length() <= 4) {
+      return "***";
+    }
+    return "***" + nationalId.substring(nationalId.length() - 4);
   }
 }

@@ -8,45 +8,46 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+/**
+ * Deduplication utility service.
+ *
+ * <p><b>DEPRECATED:</b> Not currently used in the main processing flow.
+ * The GoldenRecordService now handles deduplication directly using nationalId.
+ * Preserved for future reuse when advanced normalization is needed.
+ */
 @Service
 public class DeduplicationService {
 
   private static final Logger log = LoggerFactory.getLogger(DeduplicationService.class);
 
   /**
-   * Normalize email for deduplication matching. MVP approach: lowercase + trim only.
-   *
-   * <p>Limitations (documented for interview): - No handling of Gmail dots (john.doe ==
-   * johndoe @gmail.com) - No handling of + aliases (john+spam @example.com) - No Unicode
-   * normalization - No typo detection (gnail.com vs gmail.com)
+   * Normalize email for deduplication matching.
    */
   public String normalizeEmail(String email) {
     if (email == null || email.isBlank()) {
       return null;
     }
-
     String normalized = email.trim().toLowerCase();
-
     log.debug("Normalized email: original='{}' -> normalized='{}'", email, normalized);
-
     return normalized;
   }
 
   /**
-   * Simple name similarity check (MVP version). Could be extended with Levenshtein distance or
-   * phonetic matching.
+   * Normalize national ID for deduplication matching.
+   */
+  public String normalizeNationalId(String nationalId) {
+    if (nationalId == null || nationalId.isBlank()) {
+      return null;
+    }
+    return nationalId.trim().replaceAll("[^a-zA-Z0-9]", "");
+  }
+
+  /**
+   * Simple name similarity check (MVP version).
    */
   public boolean namesMatch(String name1, String name2) {
-    if (name1 == null && name2 == null) {
-      return true;
-    }
-    if (name1 == null || name2 == null) {
-      return false;
-    }
-
-    String n1 = name1.trim().toLowerCase();
-    String n2 = name2.trim().toLowerCase();
-
-    return n1.equals(n2);
+    if (name1 == null && name2 == null) return true;
+    if (name1 == null || name2 == null) return false;
+    return name1.trim().equalsIgnoreCase(name2.trim());
   }
 }

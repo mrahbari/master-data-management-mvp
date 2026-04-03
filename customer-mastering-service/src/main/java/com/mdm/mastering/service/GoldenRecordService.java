@@ -4,26 +4,28 @@
  */
 package com.mdm.mastering.service;
 
-import java.time.Instant;
-import java.util.UUID;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import com.mdm.mastering.dto.CustomerMasteredEvent;
 import com.mdm.mastering.dto.CustomerRawEvent;
 import com.mdm.mastering.entity.CustomerGoldenEntity;
 import com.mdm.mastering.health.MdmProcessingHealthIndicator;
 import com.mdm.mastering.metrics.MdmSliMetrics;
 import com.mdm.mastering.repository.CustomerGoldenRepository;
+import java.time.Instant;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Core MDM service for golden record management.
  *
- * <p>Responsibilities: - Deduplication using survivable matching rules - Golden record
- * creation/update - SLI metrics recording (via MdmSliMetrics) - Health indicator updates
+ * <p>Responsibilities:
+ * <ul>
+ *   <li>Deduplication using nationalId as the canonical unique identifier</li>
+ *   <li>Golden record creation/update with merge strategy</li>
+ *   <li>SLI metrics recording and health indicator updates</li>
+ * </ul>
  */
 @Service
 public class GoldenRecordService {
@@ -31,84 +33,57 @@ public class GoldenRecordService {
   private static final Logger log = LoggerFactory.getLogger(GoldenRecordService.class);
 
   private final CustomerGoldenRepository goldenRepository;
-  private final DeduplicationService deduplicationService;
   private final CustomerMasteredEventProducer eventProducer;
   private final MdmProcessingHealthIndicator healthIndicator;
   private final MdmSliMetrics metrics;
-  private final CustomerMatchingService matchingService;
 
   public GoldenRecordService(
       CustomerGoldenRepository goldenRepository,
-      DeduplicationService deduplicationService,
       CustomerMasteredEventProducer eventProducer,
       MdmProcessingHealthIndicator healthIndicator,
-      MdmSliMetrics metrics,
-      CustomerMatchingService matchingService) {
+      MdmSliMetrics metrics) {
     this.goldenRepository = goldenRepository;
-    this.deduplicationService = deduplicationService;
     this.eventProducer = eventProducer;
     this.healthIndicator = healthIndicator;
     this.metrics = metrics;
-    this.matchingService = matchingService;
   }
 
   /**
-   * Process a customer event for deduplication and golden record management.
+   * Processes a customer event for deduplication and golden record management.
    *
-   * @param event the raw customer event
+   * @param event the raw customer event from Kafka
    */
   @Transactional
   public void processCustomerEvent(CustomerRawEvent event) {
     metrics.recordProcessing(() -> processEventInternal(event));
   }
 
-  /** Internal processing logic (wrapped in metrics recording). */
   private void processEventInternal(CustomerRawEvent event) {
-    String normalizedEmail = deduplicationService.normalizeEmail(event.getEmail());
+    String nationalId = normalizeNationalId(event.getNationalId());
 
-    if (normalizedEmail == null) {
-      log.warn("Skipping event with null email: eventId={}", event.getEventId());
+    if (nationalId == null) {
+      log.warn("Skipping event with null nationalId: eventId={}", event.getEventId());
       return;
     }
 
-    // Use survivable matching service for advanced duplicate detection
-    CustomerMatchingService.MatchResult matchResult =
-        matchingService.findMatch(
-            event.getEmail(), event.getFirstName(), event.getLastName(), event.getPhone());
+    var existing = goldenRepository.findByNationalId(nationalId);
 
-    if (matchResult.isDuplicate()) {
-      // DUPLICATE DETECTED - Update existing golden record
-      handleDuplicate(event, matchResult);
-    } else if (matchResult.isPossibleDuplicate()) {
-      // POSSIBLE DUPLICATE - Log for manual review, but create new record
-      log.warn(
-          "Possible duplicate detected (manual review recommended): eventId={}, email={}, score={}, rules={}",
-          event.getEventId(),
-          normalizedEmail,
-          matchResult.getMatchScore(),
-          matchResult.getMatchedRules());
-
-      handleNewCustomer(event, normalizedEmail);
+    if (existing.isPresent()) {
+      handleExistingCustomer(event, existing.get());
     } else {
-      // NEW CUSTOMER - Create golden record
-      handleNewCustomer(event, normalizedEmail);
+      handleNewCustomer(event, nationalId);
     }
   }
 
-  /** Handle duplicate customer event. */
-  private void handleDuplicate(
-      CustomerRawEvent event, CustomerMatchingService.MatchResult matchResult) {
+  private void handleExistingCustomer(CustomerRawEvent event, CustomerGoldenEntity existing) {
+    log.info(
+        "Duplicate detected: nationalId={}, eventId={}, goldenRecordId={}",
+        maskNationalId(event.getNationalId()),
+        event.getEventId(),
+        existing.getId());
+
     metrics.recordDuplicate();
     healthIndicator.recordProcessing(true);
-
-    CustomerGoldenEntity existing = matchResult.getMatchedCustomer();
-    log.info(
-        "Duplicate detected: email={}, eventId={}, goldenRecordId={}, matchScore={}, rules={}",
-        matchResult.getMatchedCustomer().getNormalizedEmail(),
-        event.getEventId(),
-        existing.getId(),
-        matchResult.getMatchScore(),
-        matchResult.getMatchedRules());
 
     CustomerGoldenEntity updated = mergeGoldenRecord(existing, event);
     goldenRepository.save(updated);
@@ -117,12 +92,13 @@ public class GoldenRecordService {
     publishMasteredEvent(updated, event, CustomerMasteredEvent.MasteringAction.UPDATED);
   }
 
-  /** Handle new customer event. */
-  private void handleNewCustomer(CustomerRawEvent event, String normalizedEmail) {
+  private void handleNewCustomer(CustomerRawEvent event, String nationalId) {
     log.info(
-        "Creating new golden record: email={}, eventId={}", normalizedEmail, event.getEventId());
+        "Creating new golden record: nationalId={}, eventId={}",
+        maskNationalId(nationalId),
+        event.getEventId());
 
-    CustomerGoldenEntity newRecord = createGoldenRecord(event, normalizedEmail);
+    CustomerGoldenEntity newRecord = createGoldenRecord(event, nationalId);
     goldenRepository.save(newRecord);
 
     metrics.recordGoldenRecordCreated();
@@ -130,14 +106,12 @@ public class GoldenRecordService {
     publishMasteredEvent(newRecord, event, CustomerMasteredEvent.MasteringAction.CREATED);
   }
 
-  /** Create a new golden record from raw event. */
-  private CustomerGoldenEntity createGoldenRecord(CustomerRawEvent event, String normalizedEmail) {
+  private CustomerGoldenEntity createGoldenRecord(CustomerRawEvent event, String nationalId) {
     return CustomerGoldenEntity.builder()
         .id(UUID.randomUUID())
-        .normalizedEmail(normalizedEmail)
+        .nationalId(nationalId)
+        .name(event.getName())
         .email(event.getEmail())
-        .firstName(event.getFirstName())
-        .lastName(event.getLastName())
         .phone(event.getPhone())
         .confidenceScore((short) 100)
         .version(1L)
@@ -150,14 +124,12 @@ public class GoldenRecordService {
   /**
    * Merge new event data into existing golden record.
    *
-   * <p>Merge strategy (MVP): Trust latest data - Email: always update - Name fields: coalesce (keep
-   * existing if new is null) - Phone: coalesce - Source system: always update (track last source)
+   * <p>Merge strategy (MVP): Trust latest data for mutable fields, keep nationalId immutable.
    */
   private CustomerGoldenEntity mergeGoldenRecord(
       CustomerGoldenEntity existing, CustomerRawEvent event) {
-    existing.setEmail(event.getEmail());
-    existing.setFirstName(coalesce(event.getFirstName(), existing.getFirstName()));
-    existing.setLastName(coalesce(event.getLastName(), existing.getLastName()));
+    existing.setName(coalesce(event.getName(), existing.getName()));
+    existing.setEmail(coalesce(event.getEmail(), existing.getEmail()));
     existing.setPhone(coalesce(event.getPhone(), existing.getPhone()));
     existing.setLastSourceSystem(event.getSourceSystem());
     existing.setUpdatedAt(Instant.now());
@@ -166,12 +138,6 @@ public class GoldenRecordService {
     return existing;
   }
 
-  /** Coalesce helper: return value if not null, otherwise default. */
-  private <T> T coalesce(T value, T defaultValue) {
-    return value != null ? value : defaultValue;
-  }
-
-  /** Publish mastered event to Kafka. */
   private void publishMasteredEvent(
       CustomerGoldenEntity golden,
       CustomerRawEvent rawEvent,
@@ -180,14 +146,33 @@ public class GoldenRecordService {
         CustomerMasteredEvent.builder()
             .eventId(UUID.randomUUID())
             .goldenRecordId(golden.getId())
+            .nationalId(golden.getNationalId())
+            .name(golden.getName())
             .email(golden.getEmail())
-            .firstName(golden.getFirstName())
-            .lastName(golden.getLastName())
             .phone(golden.getPhone())
             .action(action)
             .timestamp(Instant.now())
             .build();
 
     eventProducer.publish(masteredEvent);
+  }
+
+  private static String normalizeNationalId(String nationalId) {
+    if (nationalId == null || nationalId.isBlank()) {
+      return null;
+    }
+    return nationalId.trim().replaceAll("[^a-zA-Z0-9]", "");
+  }
+
+  private static String maskNationalId(String nationalId) {
+    if (nationalId == null || nationalId.length() <= 4) {
+      return "***";
+    }
+    return "***" + nationalId.substring(nationalId.length() - 4);
+  }
+
+  /** Coalesce helper: return value if not null, otherwise default. */
+  private static <T> T coalesce(T value, T defaultValue) {
+    return value != null ? value : defaultValue;
   }
 }
