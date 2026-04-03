@@ -18,23 +18,21 @@ import org.springframework.stereotype.Component;
  * Kafka health indicator with connectivity and latency check.
  *
  * <p>Checks: - Broker connectivity - Produce latency - Topic existence
+ *
+ * <p>Uses a dedicated health-check topic to avoid polluting the customer.raw topic
+ * with non-JSON messages that would cause deserialization errors.
  */
 @Component
 public class KafkaHealthIndicator implements HealthIndicator {
 
   private static final Logger log = LoggerFactory.getLogger(KafkaHealthIndicator.class);
   private static final long PRODUCE_TIMEOUT_MS = 3000;
+  private static final String HEALTH_CHECK_TOPIC = "health-check";
 
   private final KafkaTemplate<String, String> kafkaTemplate;
-  private final String testTopic;
 
-  public KafkaHealthIndicator(
-      KafkaTemplate<String, String> kafkaTemplate,
-      @org.springframework.beans.factory.annotation.Value(
-              "${kafka.topics.customer-raw:customer.raw}")
-          String testTopic) {
+  public KafkaHealthIndicator(KafkaTemplate<String, String> kafkaTemplate) {
     this.kafkaTemplate = kafkaTemplate;
-    this.testTopic = testTopic;
   }
 
   @Override
@@ -43,7 +41,8 @@ public class KafkaHealthIndicator implements HealthIndicator {
 
     try {
       // Test produce connectivity with a lightweight message
-      CompletableFuture future = kafkaTemplate.send(testTopic, "__health-check__", "health");
+      // Use a dedicated health-check topic to avoid polluting customer.raw
+      CompletableFuture future = kafkaTemplate.send(HEALTH_CHECK_TOPIC, "__health-check__", "health");
 
       try {
         future.get(PRODUCE_TIMEOUT_MS, TimeUnit.MILLISECONDS);

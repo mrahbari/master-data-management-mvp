@@ -4,38 +4,78 @@
  */
 package com.mdm.ingestion.service;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.header.Headers;
+import org.apache.kafka.common.header.internals.RecordHeader;
+import org.apache.kafka.common.header.internals.RecordHeaders;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
 
 import com.mdm.ingestion.dto.CustomerRawEvent;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+@RequiredArgsConstructor
 @Service
 public class CustomerKafkaProducer {
 
-  private static final Logger log = LoggerFactory.getLogger(CustomerKafkaProducer.class);
-
   private final KafkaTemplate<String, CustomerRawEvent> kafkaTemplate;
-  private final String topic;
 
-  public CustomerKafkaProducer(
-      KafkaTemplate<String, CustomerRawEvent> kafkaTemplate,
-      @org.springframework.beans.factory.annotation.Value("${kafka.topics.customer-raw}")
-          String topic) {
-    this.kafkaTemplate = kafkaTemplate;
-    this.topic = topic;
+  @Value("${kafka.topics.customer-raw}")
+  private String topic;
+
+  /**
+   * Publishes a customer event to Kafka.
+   *
+   * @param event the event to publish
+   * @param partitionKey the partition key (normalized nationalId) for ordering guarantees
+   * @param eventVersion the event version for schema evolution
+   * @return future result of the send operation
+   */
+  public CompletableFuture<SendResult<String, CustomerRawEvent>> send(
+      CustomerRawEvent event, String partitionKey, String eventVersion) {
+    String key = partitionKey.toLowerCase().trim();
+
+    Headers headers = buildHeaders(event, partitionKey, eventVersion);
+
+    ProducerRecord<String, CustomerRawEvent> record =
+        new ProducerRecord<>(topic, null, key, event, headers);
+
+    log.debug(
+        "Publishing event to Kafka topic={}, partitionKey={}, eventId={}",
+        topic,
+        maskKey(key),
+        event.getEventId());
+
+    return kafkaTemplate.send(record);
   }
 
-  public CompletableFuture<SendResult<String, CustomerRawEvent>> send(CustomerRawEvent event) {
-    // Key by normalized email for partition ordering
-    String key = event.getEmail().toLowerCase().trim();
+  private String maskKey(String key) {
+    if (key == null || key.length() <= 8) {
+      return "***";
+    }
+    return key.substring(0, 4) + "..." + key.substring(key.length() - 4);
+  }
 
-    log.debug("Publishing event to Kafka topic={}, key={}, eventId={}", topic, key, event.getEventId());
+  private Headers buildHeaders(CustomerRawEvent event, String idempotencyKey, String eventVersion) {
+    Headers headers = new RecordHeaders();
+    headers.add(header("X-Event-ID", event.getEventId().toString()));
+    headers.add(header("X-Idempotency-Key", idempotencyKey));
+    headers.add(header("X-Source-System", event.getSourceSystem()));
+    headers.add(header("X-Timestamp", event.getTimestamp().toString()));
+    headers.add(header("X-Event-Version", eventVersion));
+    return headers;
+  }
 
-    return kafkaTemplate.send(topic, key, event);
+  private Header header(String key, String value) {
+    return new RecordHeader(key, value.getBytes(StandardCharsets.UTF_8));
   }
 }

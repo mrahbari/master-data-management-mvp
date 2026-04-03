@@ -55,7 +55,7 @@ management:
     db:
       enabled: true
     kafka:
-      enabled: true
+      enabled: false
 
   # Metrics configuration
   metrics:

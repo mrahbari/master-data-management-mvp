@@ -4,20 +4,18 @@
  */
 package com.mdm.ingestion.dto;
 
-import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 @Data
 public class CustomerIngestionRequest {
 
-  @NotBlank(message = "Email is required")
-  @Email(message = "Invalid email format")
+  @NotBlank(message = "nationalId is required")
+  private String nationalId;
+
+  private String name;
+
   private String email;
-
-  private String firstName;
-
-  private String lastName;
 
   private String phone;
 

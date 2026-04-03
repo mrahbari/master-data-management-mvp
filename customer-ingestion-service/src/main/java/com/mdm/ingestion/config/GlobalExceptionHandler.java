@@ -8,8 +8,6 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -17,18 +15,19 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-/**
- * Global exception handler for Customer Ingestion Service.
- *
- * <p>Provides consistent error responses for: - Validation errors (400) - Internal errors (500) -
- * Not found errors (404)
- */
+import com.mdm.ingestion.exception.ConcurrentProcessingException;
+import com.mdm.ingestion.exception.KafkaPublishException;
+import com.mdm.ingestion.validator.CustomerRequestValidator.ValidationException;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-  private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
-
-  /** Handle validation errors (400 Bad Request). */
   @ExceptionHandler(MethodArgumentNotValidException.class)
   public ResponseEntity<ErrorResponse> handleValidationExceptions(
       MethodArgumentNotValidException ex) {
@@ -57,10 +56,8 @@ public class GlobalExceptionHandler {
     return ResponseEntity.badRequest().body(response);
   }
 
-  /** Handle illegal argument exceptions (400 Bad Request). */
-  @ExceptionHandler(IllegalArgumentException.class)
-  public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException ex) {
-
+  @ExceptionHandler(ValidationException.class)
+  public ResponseEntity<ErrorResponse> handleValidationException(ValidationException ex) {
     ErrorResponse response =
         ErrorResponse.builder()
             .timestamp(Instant.now())
@@ -69,15 +66,34 @@ public class GlobalExceptionHandler {
             .message(ex.getMessage())
             .build();
 
-    log.debug("Illegal argument: {}", ex.getMessage());
+    log.debug("Validation error: {}", ex.getMessage());
 
     return ResponseEntity.badRequest().body(response);
   }
 
-  /** Handle unexpected internal errors (500 Internal Server Error). */
+  @ExceptionHandler(ConcurrentProcessingException.class)
+  public ResponseEntity<Void> handleConcurrentProcessing(ConcurrentProcessingException ex) {
+    log.info("Concurrent request detected: {}", ex.getMessage());
+    return ResponseEntity.status(HttpStatus.CONFLICT).build();
+  }
+
+  @ExceptionHandler(KafkaPublishException.class)
+  public ResponseEntity<ErrorResponse> handlePublishFailure(KafkaPublishException ex) {
+    log.error("Failed to publish event to Kafka: {}", ex.getMessage(), ex);
+
+    ErrorResponse response =
+        ErrorResponse.builder()
+            .timestamp(Instant.now())
+            .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
+            .error("Internal Server Error")
+            .message("Failed to process request")
+            .build();
+
+    return ResponseEntity.internalServerError().body(response);
+  }
+
   @ExceptionHandler(Exception.class)
   public ResponseEntity<ErrorResponse> handleInternalError(Exception ex) {
-
     log.error("Internal error", ex);
 
     ErrorResponse response =
@@ -91,16 +107,14 @@ public class GlobalExceptionHandler {
     return ResponseEntity.internalServerError().body(response);
   }
 
-  /** Error response structure. */
-  @lombok.Builder
-  @lombok.Data
-  @lombok.AllArgsConstructor
-  @lombok.NoArgsConstructor
+  @Getter
+  @Builder
+  @AllArgsConstructor
   public static class ErrorResponse {
-    private Instant timestamp;
-    private int status;
-    private String error;
-    private String message;
-    private Map<String, String> details;
+    private final Instant timestamp;
+    private final int status;
+    private final String error;
+    private final String message;
+    private final Map<String, String> details;
   }
 }

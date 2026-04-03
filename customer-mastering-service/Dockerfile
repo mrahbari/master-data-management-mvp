@@ -21,6 +21,6 @@ USER appuser
 
 WORKDIR /app
 
-EXPOSE 8080
+EXPOSE 8081
 
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

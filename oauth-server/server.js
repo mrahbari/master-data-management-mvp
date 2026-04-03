@@ -59,7 +59,7 @@ app.post('/oauth/token', (req, res) => {
       sub: user.username,
       roles: user.roles,
       aud: 'mdm-api',
-      iss: 'http://localhost:9999',
+      iss: 'http://host.docker.internal:9999',
       exp: now + 3600,
       iat: now,
       jti: `access-${username}-${now}`,
@@ -91,7 +91,7 @@ app.post('/oauth/token', (req, res) => {
       sub: client_id,
       roles: ['ADMIN'],
       aud: 'mdm-api',
-      iss: 'http://localhost:9999',
+      iss: 'http://host.docker.internal:9999',
       exp: now + 3600,
       iat: now,
       jti: `client-${client_id}-${now}`
@@ -209,11 +209,11 @@ app.get('/.well-known/jwks.json', (req, res) => {
 // Discovery Endpoint
 app.get('/.well-known/openid-configuration', (req, res) => {
   res.json({
-    issuer: 'http://localhost:9999',
-    authorization_endpoint: 'http://localhost:9999/oauth/authorize',
-    token_endpoint: 'http://localhost:9999/oauth/token',
-    userinfo_endpoint: 'http://localhost:9999/oauth/userinfo',
-    jwks_uri: 'http://localhost:9999/.well-known/jwks.json',
+    issuer: 'http://host.docker.internal:9999',
+    authorization_endpoint: 'http://host.docker.internal:9999/oauth/authorize',
+    token_endpoint: 'http://host.docker.internal:9999/oauth/token',
+    userinfo_endpoint: 'http://host.docker.internal:9999/oauth/userinfo',
+    jwks_uri: 'http://host.docker.internal:9999/.well-known/jwks.json',
     response_types_supported: ['code', 'token'],
     grant_types_supported: ['authorization_code', 'password', 'client_credentials'],
     token_endpoint_auth_methods_supported: ['client_secret_basic']

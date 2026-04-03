@@ -58,29 +58,30 @@ services:
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       LOG_LEVEL: INFO
-      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://oauth-server:9999
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://host.docker.internal:9999
     depends_on:
       oauth-server:
         condition: service_healthy
       kafka:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
-      interval: 10s
+      test: ["CMD", "curl", "-f", "-s", "http://localhost:8080/actuator/health"]
+      interval: 15s
       timeout: 5s
-      retries: 5
+      retries: 3
+      start_period: 40s
 
   customer-mastering-service:
     build: ./customer-mastering-service
     ports:
-      - "8081:8080"
+      - "8081:8081"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       DATABASE_URL: jdbc:postgresql://postgres:5432/mdm_db
       DATABASE_USERNAME: mdm_user
       DATABASE_PASSWORD: mdm_password
       LOG_LEVEL: INFO
-      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://oauth-server:9999
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://host.docker.internal:9999
     depends_on:
       oauth-server:
         condition: service_healthy
@@ -89,10 +90,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
-      interval: 10s
+      test: ["CMD", "curl", "-f", "-s", "http://localhost:8081/actuator/health"]
+      interval: 15s
       timeout: 5s
-      retries: 5
+      retries: 3
+      start_period: 40s
 
 volumes:
   postgres-data:
