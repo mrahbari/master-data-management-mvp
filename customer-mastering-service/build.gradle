@@ -30,6 +30,8 @@ dependencies {
     implementation 'io.micrometer:micrometer-core'
     implementation 'io.micrometer:micrometer-registry-prometheus'
     implementation 'org.springframework.boot:spring-boot-starter-aop'
+    implementation 'org.springframework.retry:spring-retry'
+    implementation 'org.aspectj:aspectjweaver'
 
     runtimeOnly 'org.postgresql:postgresql'
 

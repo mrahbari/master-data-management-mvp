@@ -37,6 +37,9 @@ public class KafkaConfig {
   @Value("${kafka.topics.customer-mastered}")
   private String customerMasteredTopic;
 
+  @Value("${kafka.topics.customer-dlq:customer.dlq}")
+  private String customerDlqTopic;
+
   @Bean
   public NewTopic customerRawTopic() {
     return TopicBuilder.name(customerRawTopic).partitions(3).replicas(1).build();
@@ -45,6 +48,11 @@ public class KafkaConfig {
   @Bean
   public NewTopic customerMasteredTopic() {
     return TopicBuilder.name(customerMasteredTopic).partitions(3).replicas(1).build();
+  }
+
+  @Bean
+  public NewTopic customerDlqTopic() {
+    return TopicBuilder.name(customerDlqTopic).partitions(3).replicas(1).build();
   }
 
   @Bean

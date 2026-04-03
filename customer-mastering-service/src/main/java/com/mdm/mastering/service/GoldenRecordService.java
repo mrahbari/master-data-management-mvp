@@ -7,6 +7,8 @@ package com.mdm.mastering.service;
 import com.mdm.mastering.dto.CustomerMasteredEvent;
 import com.mdm.mastering.dto.CustomerRawEvent;
 import com.mdm.mastering.entity.CustomerGoldenEntity;
+import com.mdm.mastering.exception.ClassifiedException;
+import com.mdm.mastering.exception.ErrorType;
 import com.mdm.mastering.health.MdmProcessingHealthIndicator;
 import com.mdm.mastering.metrics.MdmSliMetrics;
 import com.mdm.mastering.repository.CustomerGoldenRepository;
@@ -14,6 +16,7 @@ import java.time.Instant;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,16 +65,30 @@ public class GoldenRecordService {
     String nationalId = normalizeNationalId(event.getNationalId());
 
     if (nationalId == null) {
-      log.warn("Skipping event with null nationalId: eventId={}", event.getEventId());
-      return;
+      throw new ClassifiedException(
+          "Event has null or blank nationalId: eventId=" + event.getEventId(),
+          ErrorType.BUSINESS);
     }
 
-    var existing = goldenRepository.findByNationalId(nationalId);
+    try {
+      var existing = goldenRepository.findByNationalId(nationalId);
 
-    if (existing.isPresent()) {
-      handleExistingCustomer(event, existing.get());
-    } else {
-      handleNewCustomer(event, nationalId);
+      if (existing.isPresent()) {
+        handleExistingCustomer(event, existing.get());
+      } else {
+        handleNewCustomer(event, nationalId);
+      }
+    } catch (DataIntegrityViolationException ex) {
+      throw new ClassifiedException(
+          "Data integrity violation for nationalId=" + maskNationalId(nationalId),
+          ErrorType.PERMANENT, ex);
+    } catch (Exception ex) {
+      if (ex instanceof ClassifiedException) {
+        throw ex;
+      }
+      throw new ClassifiedException(
+          "Unexpected error processing event for nationalId=" + maskNationalId(nationalId),
+          ErrorType.TRANSIENT, ex);
     }
   }
 
