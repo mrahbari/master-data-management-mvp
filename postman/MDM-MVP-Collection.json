@@ -1,8 +1,11 @@
 {
   "info": {
+    "_postman_id": "62035653-89e6-4921-b39a-76a68bc58dc1",
     "name": "MDM MVP - Customer Management",
     "description": "Complete Postman collection for testing the MDM (Master Data Management) MVP system with CQRS architecture.\n\n## Architecture\n- **Customer Ingestion Service** (port 8080) — Command side (writes via Kafka)\n- **Customer Mastering Service** (port 8081) — Query side (reads from PostgreSQL)\n- **OAuth2 Server** (port 9999) — JWT token issuance (RS256)\n- **Kafka** (port 9092) — Event streaming (KRaft mode)\n- **PostgreSQL** (port 5432) — Golden record storage\n\n## Key Concepts\n- **nationalId** is the canonical unique identifier for customer deduplication\n- Deduplication is by **nationalId exact match** (not email)\n- Kafka partition key = nationalId (guarantees per-customer ordering)\n- Dual-key idempotency: client-provided + SHA-256(nationalId|sourceSystem)\n- DLQ (Dead Letter Queue) for poison messages after retry exhaustion\n\n## Collection Structure\n1. **OAuth2 Authentication** — Get JWT tokens\n2. **Health & Setup** — Service health checks\n3. **Command Side (Write)** — Customer ingestion with nationalId\n4. **Query Side (Read)** — Customer queries by nationalId\n5. **Idempotency Testing** — Duplicate detection\n6. **Validation & Errors** — Error handling\n7. **DLQ & Retry** — Dead Letter Queue testing\n8. **Observability** — Metrics & SLOs\n\n## Environment Variables\n- `base_url_ingestion`: http://localhost:8080\n- `base_url_mastering`: http://localhost:8081\n- `oauth_url`: http://localhost:9999\n- `oauth_token`: JWT token (auto-set)\n- `test_national_id`: Test national ID (auto-set)\n- `test_customer_id`: Golden record ID (auto-set)",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "2896116",
+    "_collection_link": "https://go.postman.co/collection/2896116-62035653-89e6-4921-b39a-76a68bc58dc1?source=collection_link"
   },
   "item": [
     {
@@ -22,10 +25,23 @@
                   "pm.test(\"Has access_token\", function() {",
                   "    pm.expect(jsonData.access_token).to.exist;",
                   "});",
-                  "pm.environment.set(\"oauth_token\", jsonData.access_token);",
-                  "pm.environment.set(\"admin_token\", jsonData.access_token);",
-                  "console.log(\"Admin token saved: \" + jsonData.access_token.substring(0, 50) + \"...\");"
-                ]
+                  "pm.collectionVariables.set(\"oauth_token\", jsonData.access_token);",
+                  "pm.collectionVariables.set(\"admin_token\", jsonData.access_token);",
+                  "console.log(\"Admin token saved: \" + jsonData.access_token.substring(0, 50) + \"...\");",
+                  "",
+                  "pm.test(\"Extract Access Token\", () => {",
+                  "    const response = pm.response.json();",
+                  "    if (response.access_token) {",
+                  "        pm.collectionVariables.set(\"access_token\", response.access_token);",
+                  "        console.log(\"Access Token saved:\", response.access_token);",
+                  "    } else {",
+                  "        console.error(\"No Access Token found in response!\");",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
               }
             }
           ],
@@ -56,8 +72,35 @@
           "response": [
             {
               "name": "Success Response",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"grant_type\": \"password\",\n  \"client_id\": \"mdm-client\",\n  \"client_secret\": \"mdm-secret\",\n  \"username\": \"admin\",\n  \"password\": \"admin123\"\n}"
+                },
+                "url": {
+                  "raw": "{{oauth_url}}/oauth/token",
+                  "host": [
+                    "{{oauth_url}}"
+                  ],
+                  "path": [
+                    "oauth",
+                    "token"
+                  ]
+                },
+                "description": "Get JWT token for admin user (full access: ADMIN, CUSTOMER_WRITE, CUSTOMER_READ). Uses RS256 algorithm."
+              },
               "status": "OK",
               "code": 200,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "{\n  \"access_token\": \"eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Im9hdXRoLXNlcnZlci1yc2Eta2V5In0...\",\n  \"token_type\": \"Bearer\",\n  \"expires_in\": 3600,\n  \"refresh_token\": \"eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"scope\": \"\"\n}"
             }
           ]
@@ -74,8 +117,22 @@
                   "});",
                   "var jsonData = pm.response.json();",
                   "pm.environment.set(\"user_token\", jsonData.access_token);",
-                  "console.log(\"User token saved\");"
-                ]
+                  "pm.collectionVariables.set(\"user_token\", jsonData.access_token);",
+                  "console.log(\"User token saved\");",
+                  "",
+                  "pm.test(\"Extract Access Token\", () => {",
+                  "    const response = pm.response.json();",
+                  "    if (response.access_token) {",
+                  "        pm.collectionVariables.set(\"access_token\", response.access_token);",
+                  "        console.log(\"Access Token saved:\", response.access_token);",
+                  "    } else {",
+                  "        console.error(\"No Access Token found in response!\");",
+                  "    }",
+                  "})"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
               }
             }
           ],
@@ -117,8 +174,22 @@
                   "});",
                   "var jsonData = pm.response.json();",
                   "pm.environment.set(\"readonly_token\", jsonData.access_token);",
-                  "console.log(\"Read-only token saved\");"
-                ]
+                  "pm.collectionVariables.set(\"readonly_token\", jsonData.access_token);",
+                  "console.log(\"Read-only token saved\");",
+                  "",
+                  "pm.test(\"Extract Access Token\", () => {",
+                  "    const response = pm.response.json();",
+                  "    if (response.access_token) {",
+                  "        pm.collectionVariables.set(\"access_token\", response.access_token);",
+                  "        console.log(\"Access Token saved:\", response.access_token);",
+                  "    } else {",
+                  "        console.error(\"No Access Token found in response!\");",
+                  "    }",
+                  "})"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
               }
             }
           ],
@@ -160,8 +231,22 @@
                   "});",
                   "var jsonData = pm.response.json();",
                   "pm.environment.set(\"client_token\", jsonData.access_token);",
-                  "console.log(\"Client credentials token saved\");"
-                ]
+                  "pm.collectionVariables.set(\"client_token\", jsonData.access_token);",
+                  "console.log(\"Client credentials token saved\");",
+                  "",
+                  "pm.test(\"Extract Access Token\", () => {",
+                  "    const response = pm.response.json();",
+                  "    if (response.access_token) {",
+                  "        pm.collectionVariables.set(\"access_token\", response.access_token);",
+                  "        console.log(\"Access Token saved:\", response.access_token);",
+                  "    } else {",
+                  "        console.error(\"No Access Token found in response!\");",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
               }
             }
           ],
@@ -206,7 +291,8 @@
                   "    pm.expect(jsonData.sub).to.exist;",
                   "});",
                   "console.log(\"User: \" + jsonData.sub + \" with roles: \" + jsonData.roles);"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -252,8 +338,26 @@
           "response": [
             {
               "name": "Discovery Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{oauth_url}}/.well-known/openid-configuration",
+                  "host": [
+                    "{{oauth_url}}"
+                  ],
+                  "path": [
+                    ".well-known",
+                    "openid-configuration"
+                  ]
+                },
+                "description": "Get OAuth2/OpenID Connect configuration. Shows token endpoint, JWKS URI, and supported grant types."
+              },
               "status": "OK",
               "code": 200,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "{\n  \"issuer\": \"http://host.docker.internal:9999\",\n  \"authorization_endpoint\": \"http://host.docker.internal:9999/oauth/authorize\",\n  \"token_endpoint\": \"http://host.docker.internal:9999/oauth/token\",\n  \"userinfo_endpoint\": \"http://host.docker.internal:9999/oauth/userinfo\",\n  \"jwks_uri\": \"http://host.docker.internal:9999/.well-known/jwks.json\",\n  \"response_types_supported\": [\"code\", \"token\"],\n  \"grant_types_supported\": [\"authorization_code\", \"password\", \"client_credentials\"],\n  \"token_endpoint_auth_methods_supported\": [\"client_secret_basic\"]\n}"
             }
           ]
@@ -278,8 +382,26 @@
           "response": [
             {
               "name": "JWKS Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{oauth_url}}/.well-known/jwks.json",
+                  "host": [
+                    "{{oauth_url}}"
+                  ],
+                  "path": [
+                    ".well-known",
+                    "jwks.json"
+                  ]
+                },
+                "description": "Get the RSA public keys used by Spring Boot to validate JWT tokens (RS256 algorithm)."
+              },
               "status": "OK",
               "code": 200,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "{\n  \"keys\": [{\n    \"kty\": \"RSA\",\n    \"kid\": \"oauth-server-rsa-key\",\n    \"use\": \"sig\",\n    \"alg\": \"RS256\",\n    \"n\": \"xpPHuWk4lOOe...\",\n    \"e\": \"AQAB\"\n  }]\n}"
             }
           ]
@@ -309,8 +431,25 @@
           "response": [
             {
               "name": "Success Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url_ingestion}}/actuator/health",
+                  "host": [
+                    "{{base_url_ingestion}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ]
+                }
+              },
               "status": "OK",
               "code": 200,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "{\n  \"status\": \"UP\",\n  \"components\": {\n    \"db\": {\"status\": \"UP\"},\n    \"diskSpace\": {\"status\": \"UP\"},\n    \"livenessState\": {\"status\": \"UP\"},\n    \"readinessState\": {\"status\": \"UP\"}\n  }\n}"
             }
           ]
@@ -359,8 +498,32 @@
           "response": [
             {
               "name": "All Services UP",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url_mastering}}/actuator/health?show-details=always",
+                  "host": [
+                    "{{base_url_mastering}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ],
+                  "query": [
+                    {
+                      "key": "show-details",
+                      "value": "always"
+                    }
+                  ]
+                },
+                "description": "Shows all health indicators: database, kafka, mdmProcessing, diskSpace, liveness, readiness."
+              },
               "status": "OK",
               "code": 200,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "{\n  \"status\": \"UP\",\n  \"components\": {\n    \"database\": {\n      \"status\": \"UP\",\n      \"details\": {\"status\": \"healthy\", \"queryTimeMs\": 2, \"rawTableRows\": 0, \"goldenTableRows\": 0}\n    },\n    \"db\": {\n      \"status\": \"UP\",\n      \"details\": {\"database\": \"PostgreSQL\"}\n    },\n    \"kafka\": {\n      \"status\": \"UP\",\n      \"details\": {\"status\": \"healthy\", \"produceTimeMs\": 3, \"bootstrapServers\": \"kafka:9092\"}\n    },\n    \"mdmProcessing\": {\n      \"status\": \"UP\",\n      \"details\": {\"status\": \"healthy\", \"lastProcessingTime\": \"2026-04-03T20:17:11Z\", \"totalProcessed\": 0, \"totalDuplicates\": 0, \"duplicateRate\": \"0%\"}\n    },\n    \"diskSpace\": {\"status\": \"UP\"},\n    \"livenessState\": {\"status\": \"UP\"},\n    \"readinessState\": {\"status\": \"UP\"}\n  }\n}"
             }
           ]
@@ -388,7 +551,10 @@
                   "    pm.environment.set(\"test_event_id\", eventId);",
                   "    console.log(\"Event ID: \" + eventId);",
                   "}"
-                ]
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
               }
             }
           ],
@@ -407,7 +573,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nationalId\": \"123456789012\",\n  \"name\": \"John Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phone\": \"+1-555-123-4567\",\n  \"sourceSystem\": \"WEB\"\n}"
+              "raw": "{\n  \"nationalId\": \"{{test_national_id}}\",\n  \"name\": \"John Doe2\",\n  \"email\": \"john.doe@example.com\",\n  \"phone\": \"+1-555-123-4567\",\n  \"sourceSystem\": \"WEB\"\n}"
             },
             "url": {
               "raw": "{{base_url_ingestion}}/api/customers",
@@ -424,12 +590,46 @@
           "response": [
             {
               "name": "Success - 202 Accepted",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{oauth_token}}",
+                    "description": "OAuth2 access token with CUSTOMER_WRITE scope"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nationalId\": \"{{test_national_id}}\",\n  \"name\": \"John Doe2\",\n  \"email\": \"john.doe@example.com\",\n  \"phone\": \"+1-555-123-4567\",\n  \"sourceSystem\": \"WEB\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url_ingestion}}/api/customers",
+                  "host": [
+                    "{{base_url_ingestion}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers"
+                  ]
+                },
+                "description": "Ingest first customer by nationalId. Returns 202 Accepted (async processing). Requires OAuth2 token with CUSTOMER_WRITE scope.\n\nnationalId (12-13 alphanumeric chars) is the canonical unique identifier used for deduplication."
+              },
               "status": "Accepted",
               "code": 202,
-              "body": "{\n  \"eventId\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"ACCEPTED\"\n}",
+              "_postman_previewlanguage": "Text",
               "header": [
-                {"key": "X-Event-ID", "value": "550e8400-e29b-41d4-a716-446655440000"}
-              ]
+                {
+                  "key": "X-Event-ID",
+                  "value": "550e8400-e29b-41d4-a716-446655440000"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"eventId\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"ACCEPTED\"\n}"
             }
           ]
         },
@@ -443,7 +643,8 @@
                   "pm.test(\"Status is 202\", function() {",
                   "    pm.response.to.have.status(202);",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -507,7 +708,8 @@
                   "pm.test(\"Status is 202\", function() {",
                   "    pm.response.to.have.status(202);",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -552,7 +754,8 @@
                   "pm.test(\"Status is 202\", function() {",
                   "    pm.response.to.have.status(202);",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -607,7 +810,8 @@
                   "    pm.expect(jsonData.totalCustomers).to.exist;",
                   "});",
                   "pm.environment.set(\"total_customers\", jsonData.totalCustomers);"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -629,8 +833,26 @@
           "response": [
             {
               "name": "Success Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url_mastering}}/api/customers/count",
+                  "host": [
+                    "{{base_url_mastering}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers",
+                    "count"
+                  ]
+                }
+              },
               "status": "OK",
               "code": 200,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "{\n  \"totalCustomers\": 4\n}"
             }
           ]
@@ -650,7 +872,8 @@
                   "pm.test(\"Has nationalId\", function() {",
                   "    pm.expect(jsonData.nationalId).to.eql(pm.environment.get(\"test_national_id\"));",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -678,8 +901,32 @@
           "response": [
             {
               "name": "Success Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url_mastering}}/api/customers/by-national-id?nationalId={{test_national_id}}",
+                  "host": [
+                    "{{base_url_mastering}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers",
+                    "by-national-id"
+                  ],
+                  "query": [
+                    {
+                      "key": "nationalId",
+                      "value": "{{test_national_id}}"
+                    }
+                  ]
+                }
+              },
               "status": "OK",
               "code": 200,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"nationalId\": \"123456789012\",\n  \"name\": \"John Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phone\": \"+1-555-123-4567\",\n  \"confidenceScore\": 100,\n  \"version\": 1,\n  \"createdAt\": \"2026-04-03T20:17:11Z\",\n  \"updatedAt\": \"2026-04-03T20:17:11Z\",\n  \"lastSourceSystem\": \"WEB\"\n}"
             }
           ]
@@ -736,8 +983,39 @@
           "response": [
             {
               "name": "Success Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url_mastering}}/api/customers?page=0&size=20&sort=updatedAt,desc",
+                  "host": [
+                    "{{base_url_mastering}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "0"
+                    },
+                    {
+                      "key": "size",
+                      "value": "20"
+                    },
+                    {
+                      "key": "sort",
+                      "value": "updatedAt,desc"
+                    }
+                  ]
+                }
+              },
               "status": "OK",
               "code": 200,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "{\n  \"content\": [\n    {\n      \"id\": \"...\",\n      \"nationalId\": \"123456789012\",\n      \"name\": \"John Doe\",\n      \"email\": \"john.doe@example.com\",\n      \"phone\": \"+1-555-123-4567\",\n      \"confidenceScore\": 100,\n      \"version\": 1,\n      \"createdAt\": \"...\",\n      \"updatedAt\": \"...\",\n      \"lastSourceSystem\": \"WEB\"\n    }\n  ],\n  \"totalElements\": 4,\n  \"totalPages\": 1,\n  \"size\": 20,\n  \"number\": 0\n}"
             }
           ]
@@ -790,7 +1068,8 @@
                   "pm.test(\"Customer exists\", function() {",
                   "    pm.expect(jsonData.exists).to.be.true;",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -818,8 +1097,32 @@
           "response": [
             {
               "name": "Customer Exists",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url_mastering}}/api/customers/exists?nationalId={{test_national_id}}",
+                  "host": [
+                    "{{base_url_mastering}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers",
+                    "exists"
+                  ],
+                  "query": [
+                    {
+                      "key": "nationalId",
+                      "value": "{{test_national_id}}"
+                    }
+                  ]
+                }
+              },
               "status": "OK",
               "code": 200,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "{\n  \"nationalId\": \"123456789012\",\n  \"exists\": true\n}"
             }
           ]
@@ -838,7 +1141,8 @@
                   "pm.test(\"Customer does not exist\", function() {",
                   "    pm.expect(jsonData.exists).to.be.false;",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -867,8 +1171,33 @@
           "response": [
             {
               "name": "Not Found",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url_mastering}}/api/customers/exists?nationalId=000000000000",
+                  "host": [
+                    "{{base_url_mastering}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers",
+                    "exists"
+                  ],
+                  "query": [
+                    {
+                      "key": "nationalId",
+                      "value": "000000000000"
+                    }
+                  ]
+                },
+                "description": "Verify that a non-existent nationalId returns exists=false."
+              },
               "status": "OK",
               "code": 200,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "{\n  \"nationalId\": \"000000000000\",\n  \"exists\": false\n}"
             }
           ]
@@ -889,7 +1218,8 @@
                   "    pm.response.to.have.status(202);",
                   "});",
                   "console.log(\"Duplicate submitted with same nationalId - should be detected by mastering service\");"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -939,7 +1269,8 @@
                   "    pm.expect(jsonData.status).to.eql(\"CACHED\");",
                   "});",
                   "console.log(\"Idempotent replay detected - same nationalId + sourceSystem returns cached eventId\");"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -980,12 +1311,51 @@
           "response": [
             {
               "name": "Cached Response (Idempotent Replay)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{oauth_token}}",
+                    "description": "OAuth2 access token with CUSTOMER_WRITE scope"
+                  },
+                  {
+                    "key": "X-Idempotency-Key",
+                    "value": "my-client-key-001",
+                    "description": "Optional client-provided idempotency key"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nationalId\": \"123456789012\",\n  \"name\": \"John Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phone\": \"+1-555-123-4567\",\n  \"sourceSystem\": \"WEB\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url_ingestion}}/api/customers",
+                  "host": [
+                    "{{base_url_ingestion}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers"
+                  ]
+                },
+                "description": "Submit the EXACT same nationalId + sourceSystem combination.\n\nThe ingestion service will detect this via the deterministic idempotency key SHA-256(nationalId|sourceSystem) and return 200 OK with status=CACHED (not 202 ACCEPTED).\n\nFirst submission → 202 ACCEPTED\nReplay → 200 OK (CACHED, with X-Idempotency-Replay: true header)"
+              },
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"eventId\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"CACHED\"\n}",
+              "_postman_previewlanguage": "Text",
               "header": [
-                {"key": "X-Idempotency-Replay", "value": "true"}
-              ]
+                {
+                  "key": "X-Idempotency-Replay",
+                  "value": "true"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"eventId\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"CACHED\"\n}"
             }
           ]
         },
@@ -1000,7 +1370,8 @@
                   "    var status = pm.response.code;",
                   "    pm.expect(status).to.be.oneOf([200, 202]);",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -1053,7 +1424,10 @@
                   "var jsonData = pm.response.json();",
                   "console.log(\"Golden record version: \" + jsonData.version);",
                   "console.log(\"Golden record lastSourceSystem: \" + jsonData.lastSourceSystem);"
-                ]
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
               }
             }
           ],
@@ -1100,7 +1474,8 @@
                   "    var body = pm.response.json();",
                   "    pm.expect(body.message).to.include(\"nationalId\");",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -1135,8 +1510,39 @@
           "response": [
             {
               "name": "Validation Error",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{oauth_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Test User\",\n  \"email\": \"test@example.com\",\n  \"sourceSystem\": \"WEB\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url_ingestion}}/api/customers",
+                  "host": [
+                    "{{base_url_ingestion}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers"
+                  ]
+                },
+                "description": "nationalId is required. Should return 400 Bad Request."
+              },
               "status": "Bad Request",
               "code": 400,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "{\n  \"timestamp\": \"2026-04-03T20:30:00Z\",\n  \"status\": 400,\n  \"error\": \"Bad Request\",\n  \"message\": \"nationalId is required\"\n}"
             }
           ]
@@ -1151,7 +1557,8 @@
                   "pm.test(\"Status is 400\", function() {",
                   "    pm.response.to.have.status(400);",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -1199,7 +1606,8 @@
                   "    var body = pm.response.json();",
                   "    pm.expect(body.message).to.include(\"BANK\");",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -1243,7 +1651,8 @@
                   "pm.test(\"Status is 400\", function() {",
                   "    pm.response.to.have.status(400);",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -1286,7 +1695,8 @@
                   "pm.test(\"Status is 415\", function() {",
                   "    pm.response.to.have.status(415);",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -1321,7 +1731,8 @@
                   "pm.test(\"Status is 401\", function() {",
                   "    pm.response.to.have.status(401);",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -1361,7 +1772,8 @@
                   "pm.test(\"Status is 404\", function() {",
                   "    pm.response.to.have.status(404);",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -1399,7 +1811,8 @@
                   "pm.test(\"Status is 404\", function() {",
                   "    pm.response.to.have.status(404);",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -1431,17 +1844,48 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list",
-              "host": ["docker-compose"],
-              "path": ["exec", "kafka", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+              "raw": "docker-compose/exec/kafka/kafka-topics/--bootstrap-server/localhost:9092/--list",
+              "host": [
+                "docker-compose"
+              ],
+              "path": [
+                "exec",
+                "kafka",
+                "kafka-topics",
+                "--bootstrap-server",
+                "localhost:9092",
+                "--list"
+              ]
             },
             "description": "List all Kafka topics. Expected topics:\n- customer.raw\n- customer.mastered\n- customer.dlq\n\nRun this from the terminal, not Postman. Use: docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list"
           },
           "response": [
             {
               "name": "Topics List",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "docker-compose/exec/kafka/kafka-topics/--bootstrap-server/localhost:9092/--list",
+                  "host": [
+                    "docker-compose"
+                  ],
+                  "path": [
+                    "exec",
+                    "kafka",
+                    "kafka-topics",
+                    "--bootstrap-server",
+                    "localhost:9092",
+                    "--list"
+                  ]
+                },
+                "description": "List all Kafka topics. Expected topics:\n- customer.raw\n- customer.mastered\n- customer.dlq\n\nRun this from the terminal, not Postman. Use: docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list"
+              },
               "status": "OK",
               "code": 200,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "customer.raw\ncustomer.mastered\ncustomer.dlq"
             }
           ]
@@ -1452,9 +1896,20 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --describe --topic customer.dlq",
-              "host": ["docker-compose"],
-              "path": ["exec", "kafka", "kafka-topics", "--bootstrap-server", "localhost:9092", "--describe", "--topic", "customer.dlq"]
+              "raw": "docker-compose/exec/kafka/kafka-topics/--bootstrap-server/localhost:9092/--describe/--topic/customer.dlq",
+              "host": [
+                "docker-compose"
+              ],
+              "path": [
+                "exec",
+                "kafka",
+                "kafka-topics",
+                "--bootstrap-server",
+                "localhost:9092",
+                "--describe",
+                "--topic",
+                "customer.dlq"
+              ]
             },
             "description": "Describe the DLQ topic configuration (partitions, replication factor, retention).\n\nRun from terminal: docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --describe --topic customer.dlq"
           },
@@ -1466,17 +1921,60 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "docker-compose exec kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic customer.dlq --from-beginning --max-messages 10 --timeout-ms 10000",
-              "host": ["docker-compose"],
-              "path": ["exec", "kafka", "kafka-console-consumer", "--bootstrap-server", "localhost:9092", "--topic", "customer.dlq", "--from-beginning", "--max-messages", "10", "--timeout-ms", "10000"]
+              "raw": "docker-compose/exec/kafka/kafka-console-consumer/--bootstrap-server/localhost:9092/--topic/customer.dlq/--from-beginning/--max-messages/10/--timeout-ms/10000",
+              "host": [
+                "docker-compose"
+              ],
+              "path": [
+                "exec",
+                "kafka",
+                "kafka-console-consumer",
+                "--bootstrap-server",
+                "localhost:9092",
+                "--topic",
+                "customer.dlq",
+                "--from-beginning",
+                "--max-messages",
+                "10",
+                "--timeout-ms",
+                "10000"
+              ]
             },
             "description": "Consume DLQ messages to inspect failed events.\n\nRun from terminal:\ndocker-compose exec kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic customer.dlq --from-beginning --max-messages 10 --timeout-ms 10000\n\nDLQ messages contain:\n- originalEvent: the failed CustomerRawEvent\n- errorDetails: exception, message, stackTrace\n- processingHistory: retry attempts\n- schemaVersion: v1"
           },
           "response": [
             {
               "name": "DLQ Message Example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "docker-compose/exec/kafka/kafka-console-consumer/--bootstrap-server/localhost:9092/--topic/customer.dlq/--from-beginning/--max-messages/10/--timeout-ms/10000",
+                  "host": [
+                    "docker-compose"
+                  ],
+                  "path": [
+                    "exec",
+                    "kafka",
+                    "kafka-console-consumer",
+                    "--bootstrap-server",
+                    "localhost:9092",
+                    "--topic",
+                    "customer.dlq",
+                    "--from-beginning",
+                    "--max-messages",
+                    "10",
+                    "--timeout-ms",
+                    "10000"
+                  ]
+                },
+                "description": "Consume DLQ messages to inspect failed events.\n\nRun from terminal:\ndocker-compose exec kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic customer.dlq --from-beginning --max-messages 10 --timeout-ms 10000\n\nDLQ messages contain:\n- originalEvent: the failed CustomerRawEvent\n- errorDetails: exception, message, stackTrace\n- processingHistory: retry attempts\n- schemaVersion: v1"
+              },
               "status": "OK",
               "code": 200,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "{\n  \"originalEvent\": {\n    \"eventId\": \"abc123\",\n    \"nationalId\": \"123456789012\",\n    \"name\": \"John Doe\",\n    \"email\": \"john@example.com\",\n    \"sourceSystem\": \"WEB\",\n    \"timestamp\": \"2026-04-03T20:30:00Z\"\n  },\n  \"errorDetails\": {\n    \"exception\": \"DataIntegrityViolationException\",\n    \"message\": \"could not execute statement...\",\n    \"stackTrace\": \"org.springframework.dao.DataIntegrityViolationException...\"\n  },\n  \"processingHistory\": [\n    {\n      \"attempt\": 3,\n      \"timestamp\": \"2026-04-03T20:30:05Z\",\n      \"error\": \"DeadlockLoserDataAccessException: Deadlock detected\"\n    }\n  ],\n  \"schemaVersion\": \"v1\"\n}"
             }
           ]
@@ -1487,9 +1985,15 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "docker-compose logs --tail=100 customer-mastering-service",
-              "host": ["docker-compose"],
-              "path": ["logs", "--tail=100", "customer-mastering-service"]
+              "raw": "docker-compose/logs/--tail=100/customer-mastering-service",
+              "host": [
+                "docker-compose"
+              ],
+              "path": [
+                "logs",
+                "--tail=100",
+                "customer-mastering-service"
+              ]
             },
             "description": "Check mastering service logs for retry attempts and DLQ messages.\n\nRun from terminal:\ndocker-compose logs --tail=100 customer-mastering-service\n\nLook for:\n- 'Retry attempt for event' — retry in progress\n- 'Message sent to DLQ' — all retries exhausted\n- 'Successfully processed event' — normal processing"
           },
@@ -1501,9 +2005,15 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "docker-compose logs --tail=50 customer-mastering-service | grep -i DLQ",
-              "host": ["docker-compose"],
-              "path": ["logs", "--tail=50", "customer-mastering-service"]
+              "raw": "docker-compose/logs/--tail=50/customer-mastering-service",
+              "host": [
+                "docker-compose"
+              ],
+              "path": [
+                "logs",
+                "--tail=50",
+                "customer-mastering-service"
+              ]
             },
             "description": "Filter logs for DLQ-related entries.\n\nRun from terminal:\ndocker-compose logs --tail=50 customer-mastering-service | grep -i DLQ"
           },
@@ -1751,7 +2261,8 @@
                   "pm.test(\"Status is 200\", function() {",
                   "    pm.response.to.have.status(200);",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
@@ -1779,8 +2290,32 @@
           "response": [
             {
               "name": "SLO Status - Healthy",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url_mastering}}/actuator/health?show-details=always",
+                  "host": [
+                    "{{base_url_mastering}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ],
+                  "query": [
+                    {
+                      "key": "show-details",
+                      "value": "always"
+                    }
+                  ]
+                },
+                "description": "Get detailed health status including processing metrics:\n- totalProcessed: total events processed\n- totalDuplicates: duplicates detected\n- duplicateRate: percentage of duplicates\n\nSLO Target: 99.9% availability"
+              },
               "status": "OK",
               "code": 200,
+              "_postman_previewlanguage": "Text",
+              "header": [],
+              "cookie": [],
               "body": "{\n  \"status\": \"UP\",\n  \"components\": {\n    \"mdmProcessing\": {\n      \"status\": \"UP\",\n      \"details\": {\n        \"lastProcessingTime\": \"2026-04-03T20:17:11Z\",\n        \"totalProcessed\": 15420,\n        \"totalDuplicates\": 4230,\n        \"duplicateRate\": \"27%\"\n      }\n    }\n  }\n}"
             }
           ]
@@ -1848,7 +2383,7 @@
       ]
     },
     {
-      "name": "09 - Interview Demo Script",
+      "name": "09 - Demo Script",
       "item": [
         {
           "name": "Demo Step 1: Check Health",
@@ -1884,14 +2419,18 @@
                 "exec": [
                   "var jsonData = pm.response.json();",
                   "pm.environment.set(\"oauth_token\", jsonData.access_token);"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -1899,8 +2438,13 @@
             },
             "url": {
               "raw": "{{oauth_url}}/oauth/token",
-              "host": ["{{oauth_url}}"],
-              "path": ["oauth", "token"]
+              "host": [
+                "{{oauth_url}}"
+              ],
+              "path": [
+                "oauth",
+                "token"
+              ]
             },
             "description": "✅ Get admin JWT token (RS256 signed)."
           },
@@ -1917,24 +2461,38 @@
                   "    pm.response.to.have.status(202);",
                   "});",
                   "pm.environment.set(\"test_national_id\", \"123456789012\");"
-                ]
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
               }
             }
           ],
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Authorization", "value": "Bearer {{oauth_token}}"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nationalId\": \"123456789012\",\n  \"name\": \"John Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phone\": \"+1-555-123-4567\",\n  \"sourceSystem\": \"WEB\"\n}"
+              "raw": "{\n  \"nationalId\": \"{{test_national_id}}\",\n  \"name\": \"John Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phone\": \"+1-555-123-4567\",\n  \"sourceSystem\": \"WEB\"\n}"
             },
             "url": {
               "raw": "{{base_url_ingestion}}/api/customers",
-              "host": ["{{base_url_ingestion}}"],
-              "path": ["api", "customers"]
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
             },
             "description": "✅ Ingest customer by nationalId → returns 202 Accepted (async processing)."
           },
@@ -1947,9 +2505,20 @@
             "header": [],
             "url": {
               "raw": "{{base_url_mastering}}/api/customers/by-national-id?nationalId={{test_national_id}}",
-              "host": ["{{base_url_mastering}}"],
-              "path": ["api", "customers", "by-national-id"],
-              "query": [{"key": "nationalId", "value": "{{test_national_id}}"}]
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "by-national-id"
+              ],
+              "query": [
+                {
+                  "key": "nationalId",
+                  "value": "{{test_national_id}}"
+                }
+              ]
             },
             "description": "✅ Query golden record by nationalId — wait 3 seconds after ingestion."
           },
@@ -1965,15 +2534,22 @@
                   "pm.test(\"Status is 202\", function() {",
                   "    pm.response.to.have.status(202);",
                   "});"
-                ]
+                ],
+                "type": "text/javascript"
               }
             }
           ],
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Authorization", "value": "Bearer {{oauth_token}}"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -1981,8 +2557,13 @@
             },
             "url": {
               "raw": "{{base_url_ingestion}}/api/customers",
-              "host": ["{{base_url_ingestion}}"],
-              "path": ["api", "customers"]
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
             },
             "description": "✅ Submit duplicate (same nationalId, different data) → mastering service detects duplicate and updates golden record."
           },
@@ -1995,9 +2576,20 @@
             "header": [],
             "url": {
               "raw": "{{base_url_mastering}}/api/customers/by-national-id?nationalId={{test_national_id}}",
-              "host": ["{{base_url_mastering}}"],
-              "path": ["api", "customers", "by-national-id"],
-              "query": [{"key": "nationalId", "value": "{{test_national_id}}"}]
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "by-national-id"
+              ],
+              "query": [
+                {
+                  "key": "nationalId",
+                  "value": "{{test_national_id}}"
+                }
+              ]
             },
             "description": "✅ Show golden record was updated (version incremented, fields merged via coalesce)."
           },
@@ -2010,42 +2602,105 @@
             "header": [],
             "url": {
               "raw": "{{base_url_mastering}}/actuator/prometheus",
-              "host": ["{{base_url_mastering}}"],
-              "path": ["actuator", "prometheus"]
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "actuator",
+                "prometheus"
+              ]
             },
             "description": "✅ Show Prometheus metrics: events_processed_total, duplicates_detected_total, golden_records_created_total."
           },
           "response": []
         }
       ],
-      "description": "Step-by-step interview demo. Run these requests in order to showcase the MDM system."
+      "description": "Step-by-step demo. Run these requests in order to showcase the MDM system."
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
     }
   ],
   "variable": [
     {
       "key": "base_url_ingestion",
-      "value": "http://localhost:8080",
-      "type": "string"
+      "value": "http://localhost:8080"
     },
     {
       "key": "base_url_mastering",
-      "value": "http://localhost:8081",
-      "type": "string"
+      "value": "http://localhost:8081"
     },
     {
       "key": "test_national_id",
-      "value": "",
-      "type": "string"
+      "value": ""
     },
     {
       "key": "test_customer_id",
-      "value": "",
-      "type": "string"
+      "value": ""
     },
     {
       "key": "test_event_id",
+      "value": ""
+    },
+    {
+      "key": "oauth_url",
+      "value": ""
+    },
+    {
+      "key": "oauth_token",
+      "value": ""
+    },
+    {
+      "key": "admin_token",
+      "value": ""
+    },
+    {
+      "key": "access_token",
+      "value": ""
+    },
+    {
+      "key": "user_token",
+      "value": ""
+    },
+    {
+      "key": "readonly_token",
+      "value": ""
+    },
+    {
+      "key": "client_token",
       "value": "",
-      "type": "string"
+      "type": "default"
     }
   ]
 }
