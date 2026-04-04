@@ -8,6 +8,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -38,6 +40,7 @@ public class CustomerRawEntity {
   @Column(name = "source_system", nullable = false)
   private String sourceSystem;
 
+  @JdbcTypeCode(SqlTypes.JSON)
   @Column(name = "raw_payload", columnDefinition = "jsonb", nullable = false)
   private String rawPayload;
 
