@@ -17,13 +17,13 @@
 cd master-data-management-mvp
 
 # Start all services (OAuth server, Kafka, PostgreSQL, both microservices)
-docker-compose down
-docker-compose up --build
+docker compose down
+docker compose up --build
 
 #💣 If the problem persists (complete cleaning)
-docker-compose down -v
+docker compose down -v
 docker network prune -f
-docker-compose up --build
+docker compose up --build
 ```
 
 **What this starts:**
@@ -37,7 +37,7 @@ docker-compose up --build
 
 ```bash
 # Check service health (all should show "healthy")
-docker-compose ps
+docker compose ps
 ```
 
 Services typically take **30-60 seconds** to become healthy. Wait until all containers show `(healthy)` status.
@@ -82,10 +82,10 @@ curl "http://localhost:8081/api/customers/by-national-id?nationalId=123456789012
 
 ```bash
 # Stop all containers
-docker-compose down
+docker compose down
 
 # Stop and remove volumes (fresh start)
-docker-compose down -v
+docker compose down -v
 ```
 
 ---
@@ -123,13 +123,13 @@ The project includes interactive scripts for easier management:
 
 ### Start all services
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
 ### Verify services are running
 ```bash
 # Check container health
-docker-compose ps
+docker compose ps
 
 # Expected output: All services should be "healthy"
 ```
@@ -180,23 +180,27 @@ curl http://localhost:8081/actuator/prometheus
 # - mdm.events_processed_total
 # - mdm.duplicates_detected_total
 # - mdm.golden_records_created_total
+# - conflicts_resolved_total (conflict resolution metrics)
 ```
 
 ### View logs
 ```bash
 # All services
-docker-compose logs -f
+docker compose logs -f
 
 # Specific service
-docker-compose logs -f customer-mastering-service
+docker compose logs -f customer-mastering-service
 
 # Last 100 lines
-docker-compose logs --tail=100 customer-ingestion-service
+docker compose logs --tail=100 customer-ingestion-service
+
+# Conflict resolution logs (structured JSON)
+tail -f logs/conflict-resolution.log
 ```
 
 ### Stop services
 ```bash
-docker-compose down
+docker compose down
 ```
 
 ---
@@ -208,10 +212,10 @@ This is useful for development when you want to debug the Java services locally.
 ### Start dependencies
 ```bash
 # Only Kafka and PostgreSQL
-docker-compose up -d kafka postgres oauth-server
+docker compose up -d kafka postgres oauth-server
 
 # Wait for services
-docker-compose ps
+docker compose ps
 ```
 
 ### Run Ingestion Service
@@ -314,10 +318,10 @@ ERROR: Network "master-data-management-mvp_default" needs to be recreated - opti
 **Fix:**
 ```bash
 # Stop everything and remove the broken network
-docker-compose down --remove-orphans
+docker compose down --remove-orphans
 
 # Start fresh (network will be recreated automatically)
-docker-compose up --build -d
+docker compose up --build -d
 ```
 
 > **Why this happens:** Docker Compose auto-generates a network with internal defaults.
@@ -331,7 +335,7 @@ docker-compose up --build -d
 **Check Docker is running:**
 ```bash
 docker ps
-docker-compose version
+docker compose version
 ```
 
 **Check ports are available:**
@@ -350,7 +354,7 @@ lsof -ti:8080 | xargs kill -9
 ### Kafka connection issues
 ```bash
 # Check Kafka is running
-docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list
+docker compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list
 
 # Expected topics: customer.raw, customer.mastered, __consumer_offsets
 ```
@@ -358,10 +362,10 @@ docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list
 ### Database connection issues
 ```bash
 # Check PostgreSQL is running
-docker-compose exec postgres psql -U mdm_user -d mdm_db -c "SELECT 1"
+docker compose exec postgres psql -U mdm_user -d mdm_db -c "SELECT 1"
 
 # Check tables exist
-docker-compose exec postgres psql -U mdm_user -d mdm_db -c "\dt"
+docker compose exec postgres psql -U mdm_user -d mdm_db -c "\dt"
 
 # Expected tables: customer_raw, customer_golden, ingestion_idempotency_keys
 ```
@@ -369,8 +373,8 @@ docker-compose exec postgres psql -U mdm_user -d mdm_db -c "\dt"
 ### Service not starting
 ```bash
 # Check logs
-docker-compose logs customer-ingestion-service
-docker-compose logs customer-mastering-service
+docker compose logs customer-ingestion-service
+docker compose logs customer-mastering-service
 
 # Common issues:
 # - Port already in use: Kill process or change port in docker-compose.yml
@@ -388,16 +392,16 @@ docker-compose logs customer-mastering-service
 **Solution:**
 ```bash
 # Stop all services and remove Kafka volumes
-docker-compose down -v
+docker compose down -v
 
 # Restart with fresh Kafka
-docker-compose up --build
+docker compose up --build
 ```
 
 ### Reset Everything
 ```bash
 # Docker Compose with volume cleanup
-docker-compose down -v  # Removes all data
+docker compose down -v  # Removes all data
 
 # Kubernetes
 kubectl delete namespace mdm-system

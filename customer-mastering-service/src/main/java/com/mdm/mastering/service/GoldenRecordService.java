@@ -4,6 +4,24 @@
  */
 package com.mdm.mastering.service;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mdm.mastering.conflict.ConflictLogger;
+import com.mdm.mastering.conflict.ConflictResolutionService;
+import com.mdm.mastering.conflict.FieldConflict;
+import com.mdm.mastering.conflict.FieldResolution;
 import com.mdm.mastering.dto.CustomerMasteredEvent;
 import com.mdm.mastering.dto.CustomerRawEvent;
 import com.mdm.mastering.entity.CustomerGoldenEntity;
@@ -12,22 +30,16 @@ import com.mdm.mastering.exception.ErrorType;
 import com.mdm.mastering.health.MdmProcessingHealthIndicator;
 import com.mdm.mastering.metrics.MdmSliMetrics;
 import com.mdm.mastering.repository.CustomerGoldenRepository;
-import java.time.Instant;
-import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Core MDM service for golden record management.
  *
  * <p>Responsibilities:
+ *
  * <ul>
- *   <li>Deduplication using nationalId as the canonical unique identifier</li>
- *   <li>Golden record creation/update with merge strategy</li>
- *   <li>SLI metrics recording and health indicator updates</li>
+ *   <li>Deduplication using nationalId as the canonical unique identifier
+ *   <li>Golden record creation/update with configurable conflict resolution strategies
+ *   <li>SLI metrics recording and health indicator updates
  * </ul>
  */
 @Service
@@ -39,16 +51,24 @@ public class GoldenRecordService {
   private final CustomerMasteredEventProducer eventProducer;
   private final MdmProcessingHealthIndicator healthIndicator;
   private final MdmSliMetrics metrics;
+  private final ConflictResolutionService conflictResolutionService;
+  private final ConflictLogger conflictLogger;
+  private final ObjectMapper objectMapper;
 
   public GoldenRecordService(
       CustomerGoldenRepository goldenRepository,
       CustomerMasteredEventProducer eventProducer,
       MdmProcessingHealthIndicator healthIndicator,
-      MdmSliMetrics metrics) {
+      MdmSliMetrics metrics,
+      ConflictResolutionService conflictResolutionService,
+      ConflictLogger conflictLogger) {
     this.goldenRepository = goldenRepository;
     this.eventProducer = eventProducer;
     this.healthIndicator = healthIndicator;
     this.metrics = metrics;
+    this.conflictResolutionService = conflictResolutionService;
+    this.conflictLogger = conflictLogger;
+    this.objectMapper = new ObjectMapper();
   }
 
   /**
@@ -66,8 +86,7 @@ public class GoldenRecordService {
 
     if (nationalId == null) {
       throw new ClassifiedException(
-          "Event has null or blank nationalId: eventId=" + event.getEventId(),
-          ErrorType.BUSINESS);
+          "Event has null or blank nationalId: eventId=" + event.getEventId(), ErrorType.BUSINESS);
     }
 
     try {
@@ -81,14 +100,16 @@ public class GoldenRecordService {
     } catch (DataIntegrityViolationException ex) {
       throw new ClassifiedException(
           "Data integrity violation for nationalId=" + maskNationalId(nationalId),
-          ErrorType.PERMANENT, ex);
+          ErrorType.PERMANENT,
+          ex);
     } catch (Exception ex) {
       if (ex instanceof ClassifiedException) {
         throw ex;
       }
       throw new ClassifiedException(
           "Unexpected error processing event for nationalId=" + maskNationalId(nationalId),
-          ErrorType.TRANSIENT, ex);
+          ErrorType.TRANSIENT,
+          ex);
     }
   }
 
@@ -139,20 +160,200 @@ public class GoldenRecordService {
   }
 
   /**
-   * Merge new event data into existing golden record.
+   * Merge new event data into existing golden record using configurable conflict resolution.
    *
-   * <p>Merge strategy (MVP): Trust latest data for mutable fields, keep nationalId immutable.
+   * <p>Each field is resolved according to the configured strategy in application.yml. Conflicts
+   * are logged with full reasoning.
    */
   private CustomerGoldenEntity mergeGoldenRecord(
       CustomerGoldenEntity existing, CustomerRawEvent event) {
-    existing.setName(coalesce(event.getName(), existing.getName()));
-    existing.setEmail(coalesce(event.getEmail(), existing.getEmail()));
-    existing.setPhone(coalesce(event.getPhone(), existing.getPhone()));
+    String nationalId = existing.getNationalId();
+    Instant eventTimestamp = event.getTimestamp() != null ? event.getTimestamp() : Instant.now();
+    Instant existingTimestamp = existing.getUpdatedAt();
+
+    // Resolve each field using the conflict resolution service
+    FieldResolution nameResolution =
+        resolveField(
+            "name",
+            existing.getName(),
+            event.getName(),
+            existingTimestamp,
+            eventTimestamp,
+            existing.getLastSourceSystem(),
+            event.getSourceSystem(),
+            nationalId);
+
+    FieldResolution emailResolution =
+        resolveField(
+            "email",
+            existing.getEmail(),
+            event.getEmail(),
+            existingTimestamp,
+            eventTimestamp,
+            existing.getLastSourceSystem(),
+            event.getSourceSystem(),
+            nationalId);
+
+    FieldResolution phoneResolution =
+        resolvePhoneField(
+            existing.getPhone(),
+            event.getPhone(),
+            existingTimestamp,
+            eventTimestamp,
+            existing.getLastSourceSystem(),
+            event.getSourceSystem(),
+            nationalId);
+
+    // Apply resolved values
+    existing.setName((String) nameResolution.resolvedValue());
+    existing.setEmail((String) emailResolution.resolvedValue());
+    existing.setPhone(serializePhone(phoneResolution));
     existing.setLastSourceSystem(event.getSourceSystem());
     existing.setUpdatedAt(Instant.now());
     existing.setVersion(existing.getVersion() + 1);
 
     return existing;
+  }
+
+  /** Resolves a single field conflict and logs the result. */
+  private FieldResolution resolveField(
+      String fieldName,
+      Object currentValue,
+      Object incomingValue,
+      Instant currentTimestamp,
+      Instant incomingTimestamp,
+      String currentSource,
+      String incomingSource,
+      String nationalId) {
+
+    if (currentValue == null && incomingValue == null) {
+      return FieldResolution.unchanged(null, "Both values are null");
+    }
+
+    if (currentValue == null) {
+      return FieldResolution.changed(incomingValue, "Current value is null, using incoming");
+    }
+
+    if (incomingValue == null) {
+      return FieldResolution.unchanged(currentValue, "Incoming value is null, keeping current");
+    }
+
+    if (currentValue.equals(incomingValue)) {
+      return FieldResolution.unchanged(currentValue, "Values are identical");
+    }
+
+    // Real conflict - resolve it
+    FieldConflict conflict =
+        new FieldConflict(
+            fieldName,
+            currentValue,
+            incomingValue,
+            currentTimestamp,
+            incomingTimestamp,
+            currentSource,
+            incomingSource);
+
+    FieldResolution resolution = conflictResolutionService.resolve(conflict);
+    conflictLogger.logConflict(
+        nationalId,
+        conflict,
+        resolution,
+        conflictResolutionService.getConfigForField(fieldName).strategy().name());
+
+    return resolution;
+  }
+
+  /** Resolves phone field with special handling for multi-value arrays. */
+  private FieldResolution resolvePhoneField(
+      String existingPhone,
+      String incomingPhone,
+      Instant existingTimestamp,
+      Instant incomingTimestamp,
+      String existingSource,
+      String incomingSource,
+      String nationalId) {
+
+    List<String> existingPhones = parsePhoneList(existingPhone);
+    List<String> incomingPhones = parsePhoneList(incomingPhone);
+
+    if (existingPhones.isEmpty() && incomingPhones.isEmpty()) {
+      return FieldResolution.unchanged(null, "Both phone values are null/empty");
+    }
+
+    if (existingPhones.isEmpty()) {
+      return FieldResolution.changed(incomingPhones, "No existing phones, using incoming");
+    }
+
+    if (incomingPhones.isEmpty()) {
+      return FieldResolution.unchanged(existingPhones, "No incoming phones, keeping existing");
+    }
+
+    if (existingPhones.equals(incomingPhones)) {
+      return FieldResolution.unchanged(existingPhones, "Phone lists are identical");
+    }
+
+    // Real conflict - resolve using configured strategy
+    FieldConflict conflict =
+        new FieldConflict(
+            "phone",
+            existingPhones,
+            incomingPhones,
+            existingTimestamp,
+            incomingTimestamp,
+            existingSource,
+            incomingSource);
+
+    FieldResolution resolution = conflictResolutionService.resolve(conflict);
+    conflictLogger.logConflict(
+        nationalId,
+        conflict,
+        resolution,
+        conflictResolutionService.getConfigForField("phone").strategy().name());
+
+    return resolution;
+  }
+
+  @SuppressWarnings("unchecked")
+  private List<String> parsePhoneList(String phoneValue) {
+    if (phoneValue == null || phoneValue.isBlank()) {
+      return new ArrayList<>();
+    }
+
+    // Try to parse as JSON array first
+    if (phoneValue.trim().startsWith("[")) {
+      try {
+        return objectMapper.readValue(phoneValue, new TypeReference<List<String>>() {});
+      } catch (JsonProcessingException e) {
+        // Fall through to treat as single value
+      }
+    }
+
+    // Single phone value
+    List<String> phones = new ArrayList<>();
+    phones.add(phoneValue);
+    return phones;
+  }
+
+  private String serializePhone(FieldResolution phoneResolution) {
+    Object value = phoneResolution.resolvedValue();
+    if (value == null) {
+      return null;
+    }
+
+    if (value instanceof List) {
+      List<?> phones = (List<?>) value;
+      if (phones.isEmpty()) {
+        return null;
+      }
+      try {
+        return objectMapper.writeValueAsString(phones);
+      } catch (JsonProcessingException e) {
+        log.warn("Failed to serialize phone list: {}", e.getMessage());
+        return phones.toString();
+      }
+    }
+
+    return value.toString();
   }
 
   private void publishMasteredEvent(
@@ -186,10 +387,5 @@ public class GoldenRecordService {
       return "***";
     }
     return "***" + nationalId.substring(nationalId.length() - 4);
-  }
-
-  /** Coalesce helper: return value if not null, otherwise default. */
-  private static <T> T coalesce(T value, T defaultValue) {
-    return value != null ? value : defaultValue;
   }
 }

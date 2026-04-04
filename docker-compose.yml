@@ -90,7 +90,10 @@ services:
       DATABASE_USERNAME: mdm_user
       DATABASE_PASSWORD: mdm_password
       LOG_LEVEL: INFO
+      LOG_PATH: /app/logs
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://host.docker.internal:9999
+    volumes:
+      - ./logs:/app/logs
     depends_on:
       oauth-server:
         condition: service_healthy

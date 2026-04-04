@@ -24,6 +24,13 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Use 'docker compose' (v2 plugin) if available, otherwise fall back to 'docker-compose' (v1)
+if docker compose version &>/dev/null; then
+    DOCKER_COMPOSE="docker compose"
+else
+    DOCKER_COMPOSE="docker-compose"
+fi
+
 # ===========================================
 # Helper Functions
 # ===========================================
@@ -77,7 +84,7 @@ show_help() {
 SKIP_TESTS=false
 SKIP_QUALITY=false
 CLEAN_ONLY=false
-RESET_KAFKA=false
+RESET_KAFKA=true
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -164,14 +171,14 @@ if [ "$RESET_KAFKA" = true ]; then
     print_header "Step 1.5: Resetting Kafka Data"
     print_info "Stopping services and removing Kafka volumes..."
     
-    docker-compose down -v 2>/dev/null || true
+    $DOCKER_COMPOSE down -v 2>/dev/null || true
     print_success "Kafka data cleared"
-    
+
     print_info "Restarting infrastructure..."
-    docker-compose up -d kafka postgres
+    $DOCKER_COMPOSE up -d kafka postgres
     print_info "Waiting for Kafka and PostgreSQL to be ready (30 seconds)..."
     sleep 30
-    docker-compose ps
+    $DOCKER_COMPOSE ps
     print_success "Infrastructure restarted"
 fi
 
@@ -243,7 +250,7 @@ if [ "$RESET_KAFKA" = true ]; then
     echo "    3. Test APIs: curl http://localhost:8081/actuator/health"
 else
     echo "    1. Start OAuth2 server: cd oauth-server && node server.js"
-    echo "    2. Start services: docker-compose up"
+    echo "    2. Start services: $DOCKER_COMPOSE up"
     echo "    3. Import Postman collection: postman/MDM-MVP-Collection.json"
 fi
 echo ""

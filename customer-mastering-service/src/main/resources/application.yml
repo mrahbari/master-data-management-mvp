@@ -67,6 +67,25 @@ mdm:
         channels:
           - email
           - prometheus
+    conflict-resolution:
+      default-strategy: LATEST_UPDATE
+      field-strategies:
+        nationalId:
+          strategy: TRUSTED_SOURCE
+          trustedSources:
+            - BANK
+            - GOVERNMENT
+        email:
+          strategy: LATEST_UPDATE
+        phone:
+          strategy: MERGE
+          mergeStrategy:
+            type: UNION
+            maxValues: 5
+        name:
+          strategy: TRUSTED_SOURCE
+          trustedSources:
+            - CRM
 
 # ===========================================
 # OBSERVABILITY CONFIGURATION
@@ -152,7 +171,7 @@ logging:
   json:
     enabled: ${LOG_JSON:false}
   file:
-    name: ./logs/mastering.log
+    path: ${LOG_PATH:/app/logs}
   logback:
     rollingpolicy:
       max-file-size: 10MB

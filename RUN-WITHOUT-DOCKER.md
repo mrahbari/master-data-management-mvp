@@ -97,7 +97,7 @@ curl -X POST http://localhost:8080/api/customers \
 
 ```bash
 # On a system with Docker:
-docker-compose up --build
+docker compose up --build
 
 # Services will start:
 # - Kafka: localhost:9092

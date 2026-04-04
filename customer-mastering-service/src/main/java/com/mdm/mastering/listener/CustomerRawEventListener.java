@@ -4,22 +4,9 @@
  */
 package com.mdm.mastering.listener;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mdm.mastering.dto.CustomerRawEvent;
-import com.mdm.mastering.dto.dlq.DlqEvent;
-import com.mdm.mastering.entity.CustomerRawEntity;
-import com.mdm.mastering.exception.ClassifiedException;
-import com.mdm.mastering.exception.ErrorType;
-import com.mdm.mastering.metrics.RetryAndDlqMetrics;
-import com.mdm.mastering.repository.CustomerRawRepository;
-import com.mdm.mastering.service.DlqMessageFormatter;
-import com.mdm.mastering.service.DlqProducer;
-import com.mdm.mastering.service.GoldenRecordService;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
 import java.util.UUID;
+
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,16 +22,33 @@ import org.springframework.retry.annotation.Recover;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Component;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mdm.mastering.dto.CustomerRawEvent;
+import com.mdm.mastering.dto.dlq.DlqEvent;
+import com.mdm.mastering.entity.CustomerRawEntity;
+import com.mdm.mastering.exception.ClassifiedException;
+import com.mdm.mastering.exception.ErrorType;
+import com.mdm.mastering.metrics.RetryAndDlqMetrics;
+import com.mdm.mastering.repository.CustomerRawRepository;
+import com.mdm.mastering.service.DlqMessageFormatter;
+import com.mdm.mastering.service.DlqProducer;
+import com.mdm.mastering.service.GoldenRecordService;
+
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+
 /**
  * Kafka listener for customer raw events with retry and DLQ support.
  *
  * <p>Processing flow:
+ *
  * <ol>
- *   <li>Check idempotency (skip if already processed by eventId)</li>
- *   <li>Store raw event for audit trail</li>
- *   <li>Process via GoldenRecordService (with Spring Retry for transient errors)</li>
- *   <li>Acknowledge on success</li>
- *   <li>Send to DLQ after all retries exhausted</li>
+ *   <li>Check idempotency (skip if already processed by eventId)
+ *   <li>Store raw event for audit trail
+ *   <li>Process via GoldenRecordService (with Spring Retry for transient errors)
+ *   <li>Acknowledge on success
+ *   <li>Send to DLQ after all retries exhausted
  * </ol>
  */
 @Component
@@ -138,22 +142,21 @@ public class CustomerRawEventListener {
   }
 
   /**
-   * Processes the event with Spring Retry for transient errors.
-   * Non-retryable errors are thrown immediately without retry.
+   * Processes the event with Spring Retry for transient errors. Non-retryable errors are thrown
+   * immediately without retry.
    */
   @Retryable(
       retryFor = {
-          DeadlockLoserDataAccessException.class,
-          QueryTimeoutException.class,
-          ClassifiedException.class
+        DeadlockLoserDataAccessException.class,
+        QueryTimeoutException.class,
+        ClassifiedException.class
       },
       maxAttemptsExpression = "${kafka.retry.max-attempts:3}",
-      backoff = @Backoff(
-          delayExpression = "${kafka.retry.initial-interval:1000}",
-          multiplierExpression = "${kafka.retry.multiplier:2.0}",
-          maxDelayExpression = "${kafka.retry.max-interval:10000}"
-      )
-  )
+      backoff =
+          @Backoff(
+              delayExpression = "${kafka.retry.initial-interval:1000}",
+              multiplierExpression = "${kafka.retry.multiplier:2.0}",
+              maxDelayExpression = "${kafka.retry.max-interval:10000}"))
   private void processWithRetry(CustomerRawEvent event, long offset) {
     retryAndDlqMetrics.recordEventProcessed();
 
@@ -180,8 +183,8 @@ public class CustomerRawEventListener {
   }
 
   /**
-   * Recovery handler called when all retry attempts are exhausted.
-   * Sends the event to the Dead Letter Queue.
+   * Recovery handler called when all retry attempts are exhausted. Sends the event to the Dead
+   * Letter Queue.
    */
   @Recover
   public void recover(Exception ex, CustomerRawEvent event) {
@@ -189,9 +192,7 @@ public class CustomerRawEventListener {
     recoverWithOffset(ex, event, offset);
   }
 
-  /**
-   * Recovery handler with Kafka offset context.
-   */
+  /** Recovery handler with Kafka offset context. */
   public void recoverWithOffset(Exception ex, CustomerRawEvent event, long offset) {
     ErrorType errorType = dlqMessageFormatter.classifyException(ex);
     int retryCount = maxRetryAttempts;
@@ -214,10 +215,7 @@ public class CustomerRawEventListener {
           attempt,
           ex.getMessage());
     } else if (success) {
-      retryLog.info(
-          RETRY_MARKER,
-          "Event processed successfully: eventId={}",
-          event.getEventId());
+      retryLog.info(RETRY_MARKER, "Event processed successfully: eventId={}", event.getEventId());
     }
   }
 

@@ -8,9 +8,13 @@ import com.mdm.ingestion.entity.IdempotencyKey;
 import com.mdm.ingestion.entity.IdempotencyKey.IdempotencyStatus;
 import com.mdm.ingestion.repository.IdempotencyKeyRepository;
 import com.mdm.ingestion.util.IdempotencyKeyGenerator;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -24,15 +28,17 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>This service implements the idempotency resolution workflow:
  * <ol>
- *   <li>Check client-provided key first (if present)</li>
- *   <li>Always check the deterministic key (payload-based deduplication)</li>
- *   <li>If either is COMPLETED → return cached response</li>
- *   <li>If either is PROCESSING → return 409 Conflict</li>
- *   <li>If neither exists → insert new record with deterministic key</li>
+ *   <li>If client provides X-Idempotency-Key: check it first</li>
+ *   <li>If client key is new/unique: allow the request (skip deterministic check)</li>
+ *   <li>If NO client key: check deterministic key (payload-based deduplication)</li>
+ *   <li>If deterministic key is COMPLETED → return cached response</li>
+ *   <li>If neither exists → insert new record</li>
  * </ol>
  *
- * <p>This ensures that the same payload is never duplicated even when the client
- * sometimes sends the X-Idempotency-Key header and sometimes doesn't.
+ * <p>The deterministic key (SHA-256 of nationalId|sourceSystem) is only checked when
+ * the client does NOT provide their own idempotency key. This allows clients to send
+ * multiple different requests for the same nationalId+sourceSystem by providing
+ * unique idempotency keys for each request.
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -57,29 +63,30 @@ public class IdempotencyService {
    * @return the idempotency result indicating how to proceed
    */
   @Transactional
-  public IdempotencyResult processKey(
-      String clientProvidedKey, String nationalId, String sourceSystem) {
+  public IdempotencyResult processKey(String clientProvidedKey, String nationalId, String sourceSystem) {
     String deterministicKey = resolveDeterministicKey(nationalId, sourceSystem);
     Instant now = Instant.now(clock);
 
-    // Step 1: Check client-provided key first (if present)
+    // Step 1: If client provided a key, check it
     if (hasValue(clientProvidedKey)) {
-      Optional<IdempotencyResult> clientResult =
-          lookupByKey(clientProvidedKey, deterministicKey, now);
+      Optional<IdempotencyResult> clientResult = lookupByKey(clientProvidedKey, deterministicKey, now);
       if (clientResult.isPresent()) {
         return clientResult.get();
       }
+      // Client key is new and unique - allow the request WITHOUT checking deterministic key
+      // This enables sending different payloads for same nationalId+sourceSystem
+      return insertNewKey(clientProvidedKey, deterministicKey, now);
     }
 
-    // Step 2: Check deterministic key
+    // Step 2: NO client key - check deterministic key for payload deduplication
     Optional<IdempotencyResult> deterministicResult =
         lookupByKey(deterministicKey, deterministicKey, now);
     if (deterministicResult.isPresent()) {
       return deterministicResult.get();
     }
 
-    // Step 3: Neither found — insert new record
-    return insertNewKey(clientProvidedKey, deterministicKey, now);
+    // Step 3: No existing key found — insert new record with deterministic key
+    return insertNewKey(null, deterministicKey, now);
   }
 
   /**
@@ -152,9 +159,15 @@ public class IdempotencyService {
     Duration ttl = calculateTtl(clientProvidedKey);
     Instant expiresAt = now.plus(ttl);
 
+    // When client provides a key, use client key hash as primary key to allow
+    // multiple different requests for same nationalId+sourceSystem
+    String primaryHash = hasValue(clientProvidedKey)
+        ? hashClientKey(clientProvidedKey)
+        : deterministicKey;
+
     int inserted =
         repository.insertIfNotExists(
-            deterministicKey,
+            primaryHash,
             clientProvidedKey,
             eventId,
             IdempotencyStatus.PROCESSING.name(),
@@ -163,35 +176,47 @@ public class IdempotencyService {
 
     if (inserted > 0) {
       log.info(
-          "Idempotency key miss (new): deterministicKey={}, clientKey={}, eventId={}, ttl={}",
+          "Idempotency key miss (new): primaryHash={}, deterministicKey={}, clientKey={}, eventId={}, ttl={}",
+          maskKey(primaryHash),
           maskKey(deterministicKey),
           maskKey(clientProvidedKey),
           eventId,
           ttl.toHours() + "h");
-      return IdempotencyResult.miss(deterministicKey, eventId);
+      return IdempotencyResult.miss(primaryHash, eventId);
     }
 
-    return handleConcurrentInsert(deterministicKey);
+    return handleConcurrentInsert(primaryHash);
   }
 
-  private IdempotencyResult handleConcurrentInsert(String deterministicKey) {
+  private IdempotencyResult handleConcurrentInsert(String primaryHash) {
     IdempotencyKey concurrentKey =
         repository
-            .findByKeyHash(deterministicKey)
+            .findByKeyHash(primaryHash)
             .orElseThrow(() -> new IllegalStateException("Key should exist after failed insert"));
 
     if (concurrentKey.getStatus() == IdempotencyStatus.COMPLETED) {
       log.info(
-          "Idempotency key hit (concurrent): deterministicKey={}, eventId={}",
-          maskKey(deterministicKey),
+          "Idempotency key hit (concurrent): keyHash={}, eventId={}",
+          maskKey(primaryHash),
           concurrentKey.getEventId());
-      return IdempotencyResult.hit(deterministicKey, concurrentKey.getEventId());
+      return IdempotencyResult.hit(primaryHash, concurrentKey.getEventId());
     }
 
     log.info(
-        "Idempotency key still processing (concurrent): deterministicKey={}",
-        maskKey(deterministicKey));
-    return IdempotencyResult.processing(deterministicKey);
+        "Idempotency key still processing (concurrent): keyHash={}",
+        maskKey(primaryHash));
+    return IdempotencyResult.processing(primaryHash);
+  }
+
+  /** Hashes a client-provided idempotency key for storage. */
+  private String hashClientKey(String clientKey) {
+    try {
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      byte[] hashBytes = digest.digest(clientKey.getBytes(StandardCharsets.UTF_8));
+      return HexFormat.of().formatHex(hashBytes);
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 algorithm not available", e);
+    }
   }
 
   private Duration calculateTtl(String clientProvidedKey) {

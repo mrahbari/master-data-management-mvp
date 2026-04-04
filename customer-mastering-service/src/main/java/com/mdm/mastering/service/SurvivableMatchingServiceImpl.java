@@ -4,7 +4,6 @@
  */
 package com.mdm.mastering.service;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -18,25 +17,19 @@ import com.mdm.mastering.repository.CustomerGoldenRepository;
 /**
  * Survivable Matching Service Implementation - Advanced Duplicate Detection.
  *
- * <p><b>DEPRECATED:</b> This service is not currently used in the main processing flow.
- * The GoldenRecordService now uses nationalId as the canonical unique identifier for
- * deduplication. This service is preserved for future use when advanced fuzzy matching
- * is required (Phase 2 of the roadmap).
+ * <p><b>DEPRECATED:</b> This service is not currently used in the main processing flow. The
+ * GoldenRecordService now uses nationalId as the canonical unique identifier for deduplication.
+ * This service is preserved for future use when advanced fuzzy matching is required (Phase 2 of the
+ * roadmap).
  *
  * <p>Implements multiple fuzzy matching rules to detect duplicates even when data varies:
  *
- * <p>Rule 1: Email Exact Match (normalized)
- * Rule 2: Name Similarity (Levenshtein distance)
- * Rule 3: Phonetic Matching (Soundex/Metaphone)
- * Rule 4: Nickname Mapping (John=Jon=Johnny)
- * Rule 5: Phone Number Normalization
- * Rule 6: Combined Scoring (weighted match)
+ * <p>Rule 1: Email Exact Match (normalized) Rule 2: Name Similarity (Levenshtein distance) Rule 3:
+ * Phonetic Matching (Soundex/Metaphone) Rule 4: Nickname Mapping (John=Jon=Johnny) Rule 5: Phone
+ * Number Normalization Rule 6: Combined Scoring (weighted match)
  *
- * <p>Matching Strategy:
- * - Each rule contributes to a total match score
- * - Score >= 80% → Considered duplicate
- * - Score 50-79% → Possible duplicate (flag for review)
- * - Score < 50% → Not a duplicate
+ * <p>Matching Strategy: - Each rule contributes to a total match score - Score >= 80% → Considered
+ * duplicate - Score 50-79% → Possible duplicate (flag for review) - Score < 50% → Not a duplicate
  */
 @Service
 public class SurvivableMatchingServiceImpl implements CustomerMatchingService {
@@ -161,13 +154,19 @@ public class SurvivableMatchingServiceImpl implements CustomerMatchingService {
     return n1.contains(n2) || n2.contains(n1) ? 0.7 : 0.0;
   }
 
-  private double scorePhoneticMatch(String firstName1, String firstName2, String lastName1, String lastName2) {
+  private double scorePhoneticMatch(
+      String firstName1, String firstName2, String lastName1, String lastName2) {
     double firstScore = 0.0, lastScore = 0.0;
-    if (firstName1 != null && firstName2 != null && !firstName1.isEmpty() && !firstName2.isEmpty()) {
-      firstScore = soundex(normalizeName(firstName1)).equals(soundex(normalizeName(firstName2))) ? 1.0 : 0.0;
+    if (firstName1 != null
+        && firstName2 != null
+        && !firstName1.isEmpty()
+        && !firstName2.isEmpty()) {
+      firstScore =
+          soundex(normalizeName(firstName1)).equals(soundex(normalizeName(firstName2))) ? 1.0 : 0.0;
     }
     if (lastName1 != null && lastName2 != null && !lastName1.isEmpty() && !lastName2.isEmpty()) {
-      lastScore = soundex(normalizeName(lastName1)).equals(soundex(normalizeName(lastName2))) ? 1.0 : 0.0;
+      lastScore =
+          soundex(normalizeName(lastName1)).equals(soundex(normalizeName(lastName2))) ? 1.0 : 0.0;
     }
     return (firstScore > 0 || lastScore > 0) ? (firstScore + lastScore) / 2.0 : 0.0;
   }
@@ -213,28 +212,73 @@ public class SurvivableMatchingServiceImpl implements CustomerMatchingService {
   }
 
   private static final java.util.Map<String, String> NICKNAME_MAP =
-      new java.util.HashMap<String, String>() {{
-        put("john", "john"); put("jon", "john"); put("jonny", "john");
-        put("johnny", "john"); put("jack", "john"); put("jock", "john"); put("ian", "john");
-        put("robert", "robert"); put("rob", "robert"); put("bob", "robert");
-        put("bobby", "robert"); put("robbie", "robert");
-        put("william", "william"); put("will", "william"); put("bill", "william");
-        put("billy", "william"); put("willy", "william");
-        put("richard", "richard"); put("rich", "richard"); put("rick", "richard");
-        put("ricky", "richard"); put("dick", "richard");
-        put("michael", "michael"); put("mike", "michael"); put("mikey", "michael"); put("mick", "michael");
-        put("joseph", "joseph"); put("joe", "joseph"); put("joey", "joseph");
-        put("christopher", "christopher"); put("chris", "christopher"); put("topher", "christopher");
-        put("daniel", "daniel"); put("dan", "daniel"); put("danny", "daniel");
-        put("matthew", "matthew"); put("matt", "matthew"); put("matty", "matthew");
-        put("alexander", "alexander"); put("alex", "alexander"); put("al", "alexander");
-        put("nicholas", "nicholas"); put("nick", "nicholas"); put("nicky", "nicholas");
-        put("anthony", "anthony"); put("tony", "anthony"); put("ant", "anthony");
-        put("elizabeth", "elizabeth"); put("liz", "elizabeth"); put("beth", "elizabeth");
-        put("katherine", "katherine"); put("kate", "katherine"); put("kathy", "katherine");
-        put("catherine", "katherine"); put("jennifer", "jennifer"); put("jen", "jennifer");
-        put("jenny", "jennifer"); put("patricia", "patricia"); put("pat", "patricia");
-        put("barbara", "barbara"); put("barb", "barbara"); put("margaret", "margaret");
-        put("maggie", "margaret"); put("dorothy", "dorothy"); put("dot", "dorothy");
-      }};
+      new java.util.HashMap<String, String>() {
+        {
+          put("john", "john");
+          put("jon", "john");
+          put("jonny", "john");
+          put("johnny", "john");
+          put("jack", "john");
+          put("jock", "john");
+          put("ian", "john");
+          put("robert", "robert");
+          put("rob", "robert");
+          put("bob", "robert");
+          put("bobby", "robert");
+          put("robbie", "robert");
+          put("william", "william");
+          put("will", "william");
+          put("bill", "william");
+          put("billy", "william");
+          put("willy", "william");
+          put("richard", "richard");
+          put("rich", "richard");
+          put("rick", "richard");
+          put("ricky", "richard");
+          put("dick", "richard");
+          put("michael", "michael");
+          put("mike", "michael");
+          put("mikey", "michael");
+          put("mick", "michael");
+          put("joseph", "joseph");
+          put("joe", "joseph");
+          put("joey", "joseph");
+          put("christopher", "christopher");
+          put("chris", "christopher");
+          put("topher", "christopher");
+          put("daniel", "daniel");
+          put("dan", "daniel");
+          put("danny", "daniel");
+          put("matthew", "matthew");
+          put("matt", "matthew");
+          put("matty", "matthew");
+          put("alexander", "alexander");
+          put("alex", "alexander");
+          put("al", "alexander");
+          put("nicholas", "nicholas");
+          put("nick", "nicholas");
+          put("nicky", "nicholas");
+          put("anthony", "anthony");
+          put("tony", "anthony");
+          put("ant", "anthony");
+          put("elizabeth", "elizabeth");
+          put("liz", "elizabeth");
+          put("beth", "elizabeth");
+          put("katherine", "katherine");
+          put("kate", "katherine");
+          put("kathy", "katherine");
+          put("catherine", "katherine");
+          put("jennifer", "jennifer");
+          put("jen", "jennifer");
+          put("jenny", "jennifer");
+          put("patricia", "patricia");
+          put("pat", "patricia");
+          put("barbara", "barbara");
+          put("barb", "barbara");
+          put("margaret", "margaret");
+          put("maggie", "margaret");
+          put("dorothy", "dorothy");
+          put("dot", "dorothy");
+        }
+      };
 }

@@ -9,9 +9,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-/**
- * Captures error details for a failed DLQ event.
- */
+/** Captures error details for a failed DLQ event. */
 @Getter
 @Builder
 @NoArgsConstructor

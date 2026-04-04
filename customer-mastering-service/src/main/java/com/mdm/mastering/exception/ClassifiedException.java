@@ -5,8 +5,8 @@
 package com.mdm.mastering.exception;
 
 /**
- * Base exception for classified errors in the mastering service.
- * Carries an {@link ErrorType} to drive retry/DLQ routing decisions.
+ * Base exception for classified errors in the mastering service. Carries an {@link ErrorType} to
+ * drive retry/DLQ routing decisions.
  */
 public class ClassifiedException extends RuntimeException {
 
