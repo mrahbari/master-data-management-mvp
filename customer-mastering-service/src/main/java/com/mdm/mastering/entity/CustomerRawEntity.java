@@ -7,9 +7,10 @@ package com.mdm.mastering.entity;
 import java.time.Instant;
 import java.util.UUID;
 
-import jakarta.persistence.*;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
+
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;

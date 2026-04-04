@@ -4,11 +4,10 @@
  */
 package com.mdm.mastering.controller;
 
-import com.mdm.mastering.dto.CustomerQueryResponse;
-import com.mdm.mastering.service.CustomerQueryService;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -20,6 +19,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.mdm.mastering.dto.CustomerQueryResponse;
+import com.mdm.mastering.service.CustomerQueryService;
+
 /**
  * Customer Query Controller (Read Side of CQRS).
  *
@@ -27,9 +29,10 @@ import org.springframework.web.bind.annotation.RestController;
  * CustomerQueryService to fetch data from the golden record table.
  *
  * <p>CQRS Pattern:
+ *
  * <ul>
- *   <li>Command Side: Customer Ingestion Service (writes to Kafka)</li>
- *   <li>Query Side: This controller (reads from PostgreSQL)</li>
+ *   <li>Command Side: Customer Ingestion Service (writes to Kafka)
+ *   <li>Query Side: This controller (reads from PostgreSQL)
  * </ul>
  */
 @RestController
@@ -111,8 +114,7 @@ public class CustomerQueryController {
    * <p>GET /api/customers/exists?nationalId=123456789012
    */
   @GetMapping("/exists")
-  public ResponseEntity<Map<String, Object>> checkCustomerExists(
-      @RequestParam String nationalId) {
+  public ResponseEntity<Map<String, Object>> checkCustomerExists(@RequestParam String nationalId) {
     boolean exists = queryService.existsByNationalId(nationalId);
 
     Map<String, Object> response = new HashMap<>();

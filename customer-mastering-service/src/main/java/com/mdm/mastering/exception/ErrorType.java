@@ -4,9 +4,7 @@
  */
 package com.mdm.mastering.exception;
 
-/**
- * Classifies error types for retry and DLQ routing decisions.
- */
+/** Classifies error types for retry and DLQ routing decisions. */
 public enum ErrorType {
   /** Transient errors that should be retried (DB deadlock, timeout). */
   TRANSIENT,

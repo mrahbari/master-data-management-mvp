@@ -4,20 +4,24 @@
  */
 package com.mdm.mastering.metrics;
 
+import java.util.concurrent.atomic.AtomicLong;
+
+import org.springframework.stereotype.Component;
+
 import com.mdm.mastering.exception.ErrorType;
+
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import java.util.concurrent.atomic.AtomicLong;
-import org.springframework.stereotype.Component;
 
 /**
  * Metrics for retry and DLQ monitoring.
  *
  * <p>Exposes:
+ *
  * <ul>
- *   <li>{@code retry_attempts_total} - total retry attempts by error type</li>
- *   <li>{@code dlq_messages_total} - total messages sent to DLQ by error type</li>
- *   <li>{@code dlq_rate_percent} - current DLQ rate as percentage of total events</li>
+ *   <li>{@code retry_attempts_total} - total retry attempts by error type
+ *   <li>{@code dlq_messages_total} - total messages sent to DLQ by error type
+ *   <li>{@code dlq_rate_percent} - current DLQ rate as percentage of total events
  * </ul>
  */
 @Component
@@ -34,35 +38,41 @@ public class RetryAndDlqMetrics {
   private final AtomicLong totalDlqMessages = new AtomicLong(0);
 
   public RetryAndDlqMetrics(MeterRegistry meterRegistry) {
-    this.retryAttemptsTransient = Counter.builder("retry_attempts_total")
-        .description("Total number of retry attempts")
-        .tag("error_type", "TRANSIENT")
-        .register(meterRegistry);
+    this.retryAttemptsTransient =
+        Counter.builder("retry_attempts_total")
+            .description("Total number of retry attempts")
+            .tag("error_type", "TRANSIENT")
+            .register(meterRegistry);
 
-    this.retryAttemptsPermanent = Counter.builder("retry_attempts_total")
-        .description("Total number of retry attempts")
-        .tag("error_type", "PERMANENT")
-        .register(meterRegistry);
+    this.retryAttemptsPermanent =
+        Counter.builder("retry_attempts_total")
+            .description("Total number of retry attempts")
+            .tag("error_type", "PERMANENT")
+            .register(meterRegistry);
 
-    this.retryAttemptsBusiness = Counter.builder("retry_attempts_total")
-        .description("Total number of retry attempts")
-        .tag("error_type", "BUSINESS")
-        .register(meterRegistry);
+    this.retryAttemptsBusiness =
+        Counter.builder("retry_attempts_total")
+            .description("Total number of retry attempts")
+            .tag("error_type", "BUSINESS")
+            .register(meterRegistry);
 
-    this.dlqMessagesTransient = Counter.builder("dlq_messages_total")
-        .description("Total messages sent to DLQ")
-        .tag("error_type", "TRANSIENT")
-        .register(meterRegistry);
+    this.dlqMessagesTransient =
+        Counter.builder("dlq_messages_total")
+            .description("Total messages sent to DLQ")
+            .tag("error_type", "TRANSIENT")
+            .register(meterRegistry);
 
-    this.dlqMessagesPermanent = Counter.builder("dlq_messages_total")
-        .description("Total messages sent to DLQ")
-        .tag("error_type", "PERMANENT")
-        .register(meterRegistry);
+    this.dlqMessagesPermanent =
+        Counter.builder("dlq_messages_total")
+            .description("Total messages sent to DLQ")
+            .tag("error_type", "PERMANENT")
+            .register(meterRegistry);
 
-    this.dlqMessagesBusiness = Counter.builder("dlq_messages_total")
-        .description("Total messages sent to DLQ")
-        .tag("error_type", "BUSINESS")
-        .register(meterRegistry);
+    this.dlqMessagesBusiness =
+        Counter.builder("dlq_messages_total")
+            .description("Total messages sent to DLQ")
+            .tag("error_type", "BUSINESS")
+            .register(meterRegistry);
   }
 
   /** Record a retry attempt for the given error type. */

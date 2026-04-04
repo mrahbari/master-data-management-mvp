@@ -6,6 +6,7 @@ package com.mdm.mastering.dto;
 
 import java.time.Instant;
 import java.util.UUID;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -14,8 +15,8 @@ import lombok.NoArgsConstructor;
 /**
  * Represents a raw customer event consumed from Kafka.
  *
- * <p>This DTO matches the event published by the Customer Ingestion Service.
- * The {@code nationalId} field is the canonical unique identifier for deduplication.
+ * <p>This DTO matches the event published by the Customer Ingestion Service. The {@code nationalId}
+ * field is the canonical unique identifier for deduplication.
  */
 @Getter
 @Builder

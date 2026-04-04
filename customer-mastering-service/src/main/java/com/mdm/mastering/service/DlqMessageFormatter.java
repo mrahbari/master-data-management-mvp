@@ -4,24 +4,24 @@
  */
 package com.mdm.mastering.service;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
 import com.mdm.mastering.dto.CustomerRawEvent;
 import com.mdm.mastering.dto.dlq.DlqErrorDetails;
 import com.mdm.mastering.dto.dlq.DlqEvent;
 import com.mdm.mastering.dto.dlq.ProcessingHistoryEntry;
 import com.mdm.mastering.exception.ClassifiedException;
 import com.mdm.mastering.exception.ErrorType;
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
 
-/**
- * Formats failed events into DLQ event structures with full diagnostic information.
- */
+/** Formats failed events into DLQ event structures with full diagnostic information. */
 @Service
 public class DlqMessageFormatter {
 
@@ -37,10 +37,7 @@ public class DlqMessageFormatter {
    * @return a fully populated DlqEvent ready for DLQ publishing
    */
   public DlqEvent formatDlqEvent(
-      CustomerRawEvent event,
-      Exception exception,
-      ErrorType errorType,
-      int retryCount) {
+      CustomerRawEvent event, Exception exception, ErrorType errorType, int retryCount) {
 
     StringWriter sw = new StringWriter();
     exception.printStackTrace(new PrintWriter(sw));
@@ -49,17 +46,19 @@ public class DlqMessageFormatter {
     String exceptionClassName = exception.getClass().getSimpleName();
     String errorMessage = exception.getMessage();
 
-    DlqErrorDetails errorDetails = DlqErrorDetails.builder()
-        .exception(exceptionClassName)
-        .message(truncate(errorMessage, 500))
-        .stackTrace(stackTrace)
-        .build();
+    DlqErrorDetails errorDetails =
+        DlqErrorDetails.builder()
+            .exception(exceptionClassName)
+            .message(truncate(errorMessage, 500))
+            .stackTrace(stackTrace)
+            .build();
 
-    ProcessingHistoryEntry historyEntry = ProcessingHistoryEntry.builder()
-        .attempt(retryCount)
-        .timestamp(Instant.now())
-        .error(truncate(errorMessage, 200))
-        .build();
+    ProcessingHistoryEntry historyEntry =
+        ProcessingHistoryEntry.builder()
+            .attempt(retryCount)
+            .timestamp(Instant.now())
+            .error(truncate(errorMessage, 200))
+            .build();
 
     List<ProcessingHistoryEntry> history = new ArrayList<>();
     history.add(historyEntry);
@@ -98,8 +97,7 @@ public class DlqMessageFormatter {
       return ErrorType.TRANSIENT;
     }
 
-    if (className.contains("Validation")
-        || className.contains("Business")) {
+    if (className.contains("Validation") || className.contains("Business")) {
       return ErrorType.BUSINESS;
     }
 

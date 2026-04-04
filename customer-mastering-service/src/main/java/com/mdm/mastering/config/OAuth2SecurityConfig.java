@@ -18,10 +18,9 @@ import org.springframework.security.web.SecurityFilterChain;
 /**
  * OAuth2 Resource Server Security Configuration.
  *
- * <p>Configures JWT validation for the Customer Mastering Service:
- * - JWT token validation with issuer and audience checks
- * - Read-only access to query endpoints (CUSTOMER_READ)
- * - Public access to health and metrics endpoints
+ * <p>Configures JWT validation for the Customer Mastering Service: - JWT token validation with
+ * issuer and audience checks - Read-only access to query endpoints (CUSTOMER_READ) - Public access
+ * to health and metrics endpoints
  */
 @Configuration
 @EnableWebSecurity

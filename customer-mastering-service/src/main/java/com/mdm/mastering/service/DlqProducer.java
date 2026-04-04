@@ -4,13 +4,9 @@
  */
 package com.mdm.mastering.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mdm.mastering.dto.CustomerRawEvent;
-import com.mdm.mastering.dto.dlq.DlqEvent;
-import com.mdm.mastering.exception.ErrorType;
 import java.time.Instant;
 import java.util.UUID;
+
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeaders;
@@ -20,11 +16,17 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mdm.mastering.dto.CustomerRawEvent;
+import com.mdm.mastering.dto.dlq.DlqEvent;
+import com.mdm.mastering.exception.ErrorType;
+
 /**
  * Producer service responsible for publishing failed events to the Dead Letter Queue.
  *
- * <p>Enriches DLQ messages with Kafka headers containing metadata for downstream
- * tooling and reprocessing capabilities.
+ * <p>Enriches DLQ messages with Kafka headers containing metadata for downstream tooling and
+ * reprocessing capabilities.
  */
 @Service
 public class DlqProducer {
@@ -74,24 +76,40 @@ public class DlqProducer {
     try {
       payload = objectMapper.writeValueAsString(dlqEvent);
     } catch (JsonProcessingException ex) {
-      log.error("Failed to serialize DLQ event for eventId={}: {}", event.getEventId(), ex.getMessage(), ex);
+      log.error(
+          "Failed to serialize DLQ event for eventId={}: {}",
+          event.getEventId(),
+          ex.getMessage(),
+          ex);
       payload = "{}";
     }
 
     Headers headers = buildDlqHeaders(event, errorType, retryCount, originalTopic, offset);
-    String key = event.getNationalId() != null ? event.getNationalId() : UUID.randomUUID().toString();
+    String key =
+        event.getNationalId() != null ? event.getNationalId() : UUID.randomUUID().toString();
 
-    ProducerRecord<String, String> record = new ProducerRecord<>(dlqTopic, null, key, payload, headers);
-    kafkaTemplate.send(record).whenComplete(
-        (result, ex) -> {
-          if (ex == null) {
-            log.info("Sent to DLQ: topic={}, partition={}, offset={}, eventId={}, errorType={}",
-                dlqTopic, result.getRecordMetadata().partition(), result.getRecordMetadata().offset(),
-                event.getEventId(), errorType);
-          } else {
-            log.error("Failed to send to DLQ: eventId={}, error={}", event.getEventId(), ex.getMessage(), ex);
-          }
-        });
+    ProducerRecord<String, String> record =
+        new ProducerRecord<>(dlqTopic, null, key, payload, headers);
+    kafkaTemplate
+        .send(record)
+        .whenComplete(
+            (result, ex) -> {
+              if (ex == null) {
+                log.info(
+                    "Sent to DLQ: topic={}, partition={}, offset={}, eventId={}, errorType={}",
+                    dlqTopic,
+                    result.getRecordMetadata().partition(),
+                    result.getRecordMetadata().offset(),
+                    event.getEventId(),
+                    errorType);
+              } else {
+                log.error(
+                    "Failed to send to DLQ: eventId={}, error={}",
+                    event.getEventId(),
+                    ex.getMessage(),
+                    ex);
+              }
+            });
   }
 
   private Headers buildDlqHeaders(
@@ -113,9 +131,7 @@ public class DlqProducer {
   }
 
   private byte[] truncateErrorMessage(CustomerRawEvent event, int maxLength) {
-    String msg = event.getEventId() != null
-        ? "EventId=" + event.getEventId()
-        : "Unknown event";
+    String msg = event.getEventId() != null ? "EventId=" + event.getEventId() : "Unknown event";
     return msg.substring(0, Math.min(msg.length(), maxLength)).getBytes();
   }
 

@@ -45,13 +45,13 @@ This MVP solves: **Detecting duplicate customer records and creating a unified "
 │  │                      │         │  └────────────────────────────┘  │  │
 │  └──────────────────────┘         │                                  │  │
 │                                   └──────────────────────────────────┘  │
-│                                                                          │
+│                                                                         │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │                         Kafka (KRaft)                            │   │
 │  │   Topics: customer.raw, customer.mastered                        │   │
 │  │   Partition key: nationalId (per-customer ordering)              │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
-│                                                                          │
+│                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -373,15 +373,26 @@ if (existing.isPresent()) {
 }
 ```
 
-### Merge Strategy (Coalesce)
-| Field | Strategy |
-|-------|----------|
-| `nationalId` | Immutable (never changes) |
-| `name` | Coalesce: keep existing if new is null |
-| `email` | Coalesce: keep existing if new is null |
-| `phone` | Coalesce: keep existing if new is null |
-| `sourceSystem` | Always update (track last source) |
-| `version` | Incremented (optimistic locking) |
+### Merge Strategy (Configurable Conflict Resolution)
+
+Each field can be assigned a different conflict resolution strategy via `application.yml`:
+
+| Field | Strategy | Behavior |
+|-------|----------|----------|
+| `name` | **TRUSTED_SOURCE** | Prefers values from configured trusted sources (e.g., CRM). Falls back to latest-update if neither source is trusted. |
+| `email` | **LATEST_UPDATE** | Most recent timestamp wins. Tiebreaker: prefers incoming. |
+| `phone` | **MERGE (UNION)** | Combines values from both sources, deduplicates, max 5 values, FIFO eviction. |
+| `nationalId` | **TRUSTED_SOURCE** | Prefers BANK or GOVERNMENT sources. |
+| *other fields* | **LATEST_UPDATE** (default) | Most recent timestamp wins. |
+
+**Supported Strategies:**
+- **LATEST_UPDATE** — Most recent timestamp wins (default, general-purpose)
+- **TRUSTED_SOURCE** — Prefer values from specific trusted source systems
+- **MOST_FREQUENT** — Keep the historically observed value (stable attributes)
+- **NON_NULL** — Keep the first non-null value
+- **MERGE** — Combine values (for multi-value fields like phones); supports UNION (deduplicate) and APPEND modes with configurable `maxValues`
+
+Conflicts are logged as structured JSON to `logs/conflict-resolution.log` with masked national IDs, and Prometheus metrics (`conflicts_resolved_total`) are tracked per strategy.
 
 ### Future: Survivable Matching (Phase 2)
 The `SurvivableMatchingServiceImpl` is preserved for future use when advanced fuzzy matching is needed:
@@ -543,9 +554,7 @@ curl -X POST http://localhost:8080/api/customers \
 
 ---
 
-## 15. 🗺️ Roadmap: From MVP to Production
-
-See **[ROADMAP.md](docs/ROADMAP.md)** for the complete implementation plan.
+## 15. 🗺️ Roadmap: Basic MVP
 
 ### Current State (MVP) ✅
 
@@ -556,6 +565,7 @@ See **[ROADMAP.md](docs/ROADMAP.md)** for the complete implementation plan.
 | **Data Flow** | Async processing with 202 Accepted | ✅ Complete |
 | **Identity** | nationalId as canonical unique key | ✅ Complete |
 | **Deduplication** | nationalId exact match | ✅ Complete |
+| **Conflict Resolution** | Per-field strategies (LATEST_UPDATE, TRUSTED_SOURCE, MERGE, etc.) | ✅ Complete |
 | **Idempotency** | Dual-key strategy (client + deterministic SHA-256) | ✅ Complete |
 | **Ordering** | Kafka partition key = nationalId | ✅ Complete |
 | **Storage** | PostgreSQL with raw + golden tables | ✅ Complete |
@@ -568,24 +578,77 @@ See **[ROADMAP.md](docs/ROADMAP.md)** for the complete implementation plan.
 
 ### Implementation Phases
 
-#### Phase 1: Reliability & Resilience (Next 2-4 Weeks)
+#### Phase 1: Reliability & Resilience 
 - **DLQ Error Handling** — Dead Letter Queue for poison messages
 - **Outbox Pattern** — Reliable event publishing with atomic commits
 
-#### Phase 2: Advanced Matching (Next 4-8 Weeks)
+#### Phase 2: Advanced Matching
 - **Survivable Matching** — Enable fuzzy matching (email similarity, phonetic names, nicknames)
 - **Human-in-the-Loop** — Manual review queue for low-confidence matches
 - **Confidence Scoring** — Probabilistic match scoring
 
-#### Phase 3: Scalability & Performance (Next 8-12 Weeks)
+#### Phase 3: Scalability & Performance
 - **Consumer Group Scaling** — Kubernetes HPA based on Kafka lag
 - **Redis Caching** — Cache hot records for faster deduplication
 - **Batch Processing** — Optimized bulk operations
 
-#### Phase 4: Enterprise Features (Next 12-16 Weeks)
+#### Phase 4: Enterprise Features
 - **Data Quality Scoring** — Completeness, accuracy, consistency metrics
 - **Audit Trail** — Full compliance audit logging
 - **GDPR Compliance** — Right to erasure, data portability
+
+---
+
+## 🗺️ ROADMAP
+
+Implementation tasks organized by priority. Track progress by updating the **Status** column
+(`⬜ Todo` → `🔧 In Progress` → `✅ Done`).
+
+### P0 — Critical (Must Have)
+
+| # | Task | Status |
+|---|------|--------|
+| 000 | Code Quality Enhancements (SOLID review) | ✅ Done |
+| 001 | Idempotent Ingestion Endpoint | ✅ Done |
+| 002 | Out-of-Order Event Handling | ⬜ Todo |
+| 003 | Conflict Resolution Strategy | ✅ Done |
+| 004 | Event Publishing with Change Detection | ⬜ Todo |
+| 005 | Retry and Dead Letter Queue | ✅ Done |
+| 006 | Duplicate Detection and Entity Resolution | ⬜ Todo |
+| 007 | At-Least-Once Processing Semantics | ⬜ Todo |
+| 008 | Input Validation and Sanitization | ⬜ Todo |
+| 009 | PII Protection (Encryption and Masking) | ⬜ Todo |
+| 010 | Transactional Outbox Pattern | ⬜ Todo |
+
+### P1 — Important (Should Have)
+
+| # | Task | Status |
+|---|------|--------|
+| 011 | Backpressure Handling for High Load | ⬜ Todo |
+| 012 | Field-Level Ownership Enforcement | ⬜ Todo |
+| 013 | Event Versioning Strategy | ⬜ Todo |
+| 014 | Distributed Tracing and Log Correlation | ⬜ Todo |
+| 015 | Periodic Consistency Validation | ⬜ Todo |
+| 016 | Soft Delete and GDPR Handling | ⬜ Todo |
+| 017 | CQRS Read Model | ⬜ Todo |
+| 018 | Saga Pattern for Distributed Transactions | ⬜ Todo |
+| 019 | Metrics and Observability | ⬜ Todo |
+| 020 | Third-Party API Latency Handling | ⬜ Todo |
+| 021 | Redis Cache Implementation with Invalidation | ⬜ Todo |
+| 022 | Schema Evolution and Backward Compatibility | ⬜ Todo |
+| 023 | Complete Audit Trail | ⬜ Todo |
+| 024 | Event Replay for State Rebuilding | ⬜ Todo |
+| 025 | Optimistic Locking for Concurrent Updates | ⬜ Todo |
+
+### P2 — Nice to Have
+
+| # | Task | Status |
+|---|------|--------|
+| 026 | Bulk Processing (Batch Mode) | ⬜ Todo |
+| 027 | Write Optimization — Only Update Changed Fields | ⬜ Todo |
+| 028 | Drift Detection Alerting | ⬜ Todo |
+| 029 | Data Quality Metrics | ⬜ Todo |
+| 030 | Contract Testing for Events | ⬜ Todo |
 
 ---
 
@@ -612,10 +675,10 @@ See **[ROADMAP.md](docs/ROADMAP.md)** for the complete implementation plan.
 ### Local Testing (Docker Compose)
 ```bash
 # Start all services
-docker-compose up --build -d
+docker compose up --build -d
 
 # Or start only infrastructure and run services locally
-docker-compose up -d kafka postgres
+docker compose up -d kafka postgres
 ```
 
 ### Metrics Endpoint
@@ -636,11 +699,13 @@ ERROR: Network "master-data-management-mvp_default" needs to be recreated - opti
 
 **Run:**
 ```bash
-docker-compose down --remove-orphans
-docker-compose up --build -d
+docker compose down --remove-orphans
+docker compose up --build -d
 ```
 
 The `docker-compose.yml` explicitly sets `com.docker.network.enable_ipv6: "false"` to
 prevent this, but if an old broken network already exists, the two commands above
 recreate it. The helper scripts (`scripts/run.sh`, `scripts/dev.sh`) detect this error
 automatically and handle it for you.
+
+---

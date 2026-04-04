@@ -61,16 +61,14 @@ public class IngestionUseCaseService {
    * @return response indicating whether the request was accepted or cached
    */
   @Transactional
-  public IngestionResponse ingest(
-      CustomerIngestionRequest request, String idempotencyKeyHeader) {
+  public IngestionResponse ingest(CustomerIngestionRequest request, String idempotencyKeyHeader) {
     // Step 1: Sanitize and validate input
     SanitizedRequest sanitized = inputSanitizer.sanitize(request);
 
     // Step 2: Resolve idempotency
     Instant timestamp = Instant.now(clock);
     IdempotencyResult result =
-        idempotencyService.processKey(
-            idempotencyKeyHeader, sanitized.nationalId(), sanitized.sourceSystem());
+        idempotencyService.processKey(idempotencyKeyHeader, sanitized.nationalId(), sanitized.sourceSystem());
 
     // Step 3: Handle result
     return switch (result) {

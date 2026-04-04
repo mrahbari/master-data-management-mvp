@@ -4,20 +4,9 @@
  */
 package com.mdm.mastering.listener;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
-import com.mdm.mastering.dto.CustomerRawEvent;
-import com.mdm.mastering.dto.dlq.DlqEvent;
-import com.mdm.mastering.exception.ClassifiedException;
-import com.mdm.mastering.exception.ErrorType;
-import com.mdm.mastering.metrics.RetryAndDlqMetrics;
-import com.mdm.mastering.service.DlqMessageFormatter;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Instant;
 import java.util.UUID;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -27,15 +16,30 @@ import org.springframework.retry.backoff.ExponentialBackOffPolicy;
 import org.springframework.retry.policy.SimpleRetryPolicy;
 import org.springframework.retry.support.RetryTemplate;
 
+import com.mdm.mastering.dto.CustomerRawEvent;
+import com.mdm.mastering.dto.dlq.DlqEvent;
+import com.mdm.mastering.exception.ClassifiedException;
+import com.mdm.mastering.exception.ErrorType;
+import com.mdm.mastering.metrics.RetryAndDlqMetrics;
+import com.mdm.mastering.service.DlqMessageFormatter;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 /**
  * Unit tests for retry and DLQ handling.
  *
  * <p>Test scenarios:
+ *
  * <ol>
- *   <li>Transient error with successful retry</li>
- *   <li>Permanent error (no retry, directly to DLQ)</li>
- *   <li>Transient error exhausting all retries → DLQ</li>
- *   <li>DLQ message structure validation</li>
+ *   <li>Transient error with successful retry
+ *   <li>Permanent error (no retry, directly to DLQ)
+ *   <li>Transient error exhausting all retries → DLQ
+ *   <li>DLQ message structure validation
  * </ol>
  */
 class RetryAndDlqTest {
@@ -50,14 +54,15 @@ class RetryAndDlqTest {
     SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     retryAndDlqMetrics = new RetryAndDlqMetrics(meterRegistry);
 
-    testEvent = CustomerRawEvent.builder()
-        .eventId(UUID.randomUUID())
-        .nationalId("1234567890")
-        .name("John Doe")
-        .email("john@example.com")
-        .sourceSystem("test-system")
-        .timestamp(Instant.now())
-        .build();
+    testEvent =
+        CustomerRawEvent.builder()
+            .eventId(UUID.randomUUID())
+            .nationalId("1234567890")
+            .name("John Doe")
+            .email("john@example.com")
+            .sourceSystem("test-system")
+            .timestamp(Instant.now())
+            .build();
   }
 
   // ========== Test 1: Transient error with successful retry ==========
@@ -69,13 +74,14 @@ class RetryAndDlqTest {
 
     int[] attemptCount = {0};
     try {
-      retryTemplate.execute(context -> {
-        attemptCount[0]++;
-        if (attemptCount[0] < 2) {
-          throw new DeadlockLoserDataAccessException("Deadlock detected", null);
-        }
-        return null;
-      });
+      retryTemplate.execute(
+          context -> {
+            attemptCount[0]++;
+            if (attemptCount[0] < 2) {
+              throw new DeadlockLoserDataAccessException("Deadlock detected", null);
+            }
+            return null;
+          });
       // Retry succeeded on attempt 2
       assertEquals(2, attemptCount[0], "Should succeed on second attempt");
     } catch (Exception ex) {
@@ -88,8 +94,8 @@ class RetryAndDlqTest {
   @Test
   @DisplayName("Test 2: Permanent error → immediately sent to DLQ")
   void testPermanentErrorSentToDlq() {
-    ClassifiedException permEx = new ClassifiedException(
-        "Duplicate key national_id", ErrorType.PERMANENT);
+    ClassifiedException permEx =
+        new ClassifiedException("Duplicate key national_id", ErrorType.PERMANENT);
 
     ErrorType classified = dlqMessageFormatter.classifyException(permEx);
     assertEquals(ErrorType.PERMANENT, classified);
@@ -111,10 +117,11 @@ class RetryAndDlqTest {
 
     int[] attemptCount = {0};
     try {
-      retryTemplate.execute(context -> {
-        attemptCount[0]++;
-        throw new DeadlockLoserDataAccessException("Deadlock detected", null);
-      });
+      retryTemplate.execute(
+          context -> {
+            attemptCount[0]++;
+            throw new DeadlockLoserDataAccessException("Deadlock detected", null);
+          });
     } catch (DeadlockLoserDataAccessException ex) {
       // Expected: all retries exhausted
       assertEquals(3, attemptCount[0], "Should exhaust all 3 retry attempts");
@@ -132,8 +139,8 @@ class RetryAndDlqTest {
   void testDlqMessageStructure() {
     Exception testException = new DeadlockLoserDataAccessException("Deadlock detected", null);
 
-    DlqEvent dlqEvent = dlqMessageFormatter.formatDlqEvent(
-        testEvent, testException, ErrorType.TRANSIENT, 3);
+    DlqEvent dlqEvent =
+        dlqMessageFormatter.formatDlqEvent(testEvent, testException, ErrorType.TRANSIENT, 3);
 
     // Verify structure
     assertNotNull(dlqEvent.getOriginalEvent());
@@ -157,21 +164,24 @@ class RetryAndDlqTest {
   @DisplayName("Test: Error classification for various exception types")
   void testErrorClassification() {
     // Permanent errors via ClassifiedException
-    assertEquals(ErrorType.PERMANENT,
+    assertEquals(
+        ErrorType.PERMANENT,
         dlqMessageFormatter.classifyException(
             new ClassifiedException("constraint violation", ErrorType.PERMANENT)));
 
     // Transient errors (by class name)
-    assertEquals(ErrorType.TRANSIENT,
+    assertEquals(
+        ErrorType.TRANSIENT,
         dlqMessageFormatter.classifyException(
             new DeadlockLoserDataAccessException("deadlock", null)));
 
-    assertEquals(ErrorType.TRANSIENT,
-        dlqMessageFormatter.classifyException(
-            new QueryTimeoutException("timeout", null)));
+    assertEquals(
+        ErrorType.TRANSIENT,
+        dlqMessageFormatter.classifyException(new QueryTimeoutException("timeout", null)));
 
     // Business errors via ClassifiedException
-    assertEquals(ErrorType.BUSINESS,
+    assertEquals(
+        ErrorType.BUSINESS,
         dlqMessageFormatter.classifyException(
             new ClassifiedException("validation failed", ErrorType.BUSINESS)));
   }
@@ -209,14 +219,15 @@ class RetryAndDlqTest {
   @DisplayName("Test: nationalId is used as unique identifier for idempotency")
   void testNationalIdAsUniqueIdentifier() {
     String nationalId = "unique-national-id-123";
-    CustomerRawEvent event = CustomerRawEvent.builder()
-        .eventId(UUID.randomUUID())
-        .nationalId(nationalId)
-        .name("Test User")
-        .email("test@example.com")
-        .sourceSystem("test")
-        .timestamp(Instant.now())
-        .build();
+    CustomerRawEvent event =
+        CustomerRawEvent.builder()
+            .eventId(UUID.randomUUID())
+            .nationalId(nationalId)
+            .name("Test User")
+            .email("test@example.com")
+            .sourceSystem("test")
+            .timestamp(Instant.now())
+            .build();
 
     // Verify nationalId is set and non-null
     assertEquals(nationalId, event.getNationalId());
@@ -251,8 +262,8 @@ class RetryAndDlqTest {
   @DisplayName("Test: DlqMessageFormatter handles null error message gracefully")
   void testDlqMessageFormatterHandlesNullMessage() {
     Exception nullMsgEx = new DeadlockLoserDataAccessException(null, null);
-    DlqEvent dlqEvent = dlqMessageFormatter.formatDlqEvent(
-        testEvent, nullMsgEx, ErrorType.TRANSIENT, 1);
+    DlqEvent dlqEvent =
+        dlqMessageFormatter.formatDlqEvent(testEvent, nullMsgEx, ErrorType.TRANSIENT, 1);
 
     assertNotNull(dlqEvent);
     assertNotNull(dlqEvent.getErrorDetails());
@@ -266,10 +277,11 @@ class RetryAndDlqTest {
 
     int[] attempts = {0};
     try {
-      retryTemplate.execute(context -> {
-        attempts[0]++;
-        throw new DeadlockLoserDataAccessException("fail", null);
-      });
+      retryTemplate.execute(
+          context -> {
+            attempts[0]++;
+            throw new DeadlockLoserDataAccessException("fail", null);
+          });
     } catch (Exception ex) {
       // Expected - all retries exhausted
       assertEquals(4, attempts[0], "Should attempt 4 times");

@@ -22,13 +22,13 @@
 **Start all services:**
 ```bash
 cd mdm-mvp
-docker-compose up --build
+docker compose up --build
 ```
 
 > **⚠️ Docker Network Error:** If you see `Network "master-data-management-mvp_default" needs to be recreated`, run:
 > ```bash
-> docker-compose down --remove-orphans
-> docker-compose up --build
+> docker compose down --remove-orphans
+> docker compose up --build
 > ```
 > The helper scripts (`scripts/run.sh`, `scripts/dev.sh`) detect this automatically.
 
@@ -45,7 +45,7 @@ docker-compose up --build
 
 **Stop:**
 ```bash
-docker-compose down
+docker compose down
 ```
 
 ---
@@ -56,10 +56,10 @@ docker-compose down
 
 ```bash
 # Only Kafka and PostgreSQL
-docker-compose up -d kafka postgres
+docker compose up -d kafka postgres
 
 # Wait for services to be ready
-docker-compose ps
+docker compose ps
 ```
 
 **Step 2: Run Ingestion Service**
@@ -95,7 +95,7 @@ java -jar build/libs/customer-mastering-service-1.0.0.jar \
 
 **Start infrastructure:**
 ```bash
-docker-compose up -d kafka postgres
+docker compose up -d kafka postgres
 ```
 
 **Run services with Gradle:**
@@ -241,13 +241,13 @@ Unrecognized token 'health': was expecting (JSON String, Number, Array, Object)
 **Solution:** Clear Kafka data and restart:
 ```bash
 # Stop all services and remove Kafka volumes
-docker-compose down -v
+docker compose down -v
 
 # Restart with fresh Kafka
-docker-compose up -d
+docker compose up -d
 
 # Wait for services to be healthy
-docker-compose ps
+docker compose ps
 ```
 
 **Prevention:** The health check topic is now properly configured to avoid this issue.
@@ -275,26 +275,26 @@ kill -9 <PID>
 
 **Check Kafka is running:**
 ```bash
-docker-compose ps kafka
-docker-compose logs kafka
+docker compose ps kafka
+docker compose logs kafka
 ```
 
 **Test Kafka connection:**
 ```bash
-docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list
+docker compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list
 ```
 
 ### Database Connection Issues
 
 **Check PostgreSQL is running:**
 ```bash
-docker-compose ps postgres
-docker-compose logs postgres
+docker compose ps postgres
+docker compose logs postgres
 ```
 
 **Test database connection:**
 ```bash
-docker-compose exec postgres psql -U mdm_user -d mdm_db -c "SELECT 1"
+docker compose exec postgres psql -U mdm_user -d mdm_db -c "SELECT 1"
 ```
 
 ---
@@ -332,8 +332,8 @@ ERROR: Network "master-data-management-mvp_default" needs to be recreated - opti
 
 **Fix:**
 ```bash
-docker-compose down --remove-orphans
-docker-compose up --build
+docker compose down --remove-orphans
+docker compose up --build
 ```
 
 This happens when Docker's internal IPv4/IPv6 defaults change but the existing
@@ -372,7 +372,7 @@ an old broken network exists, the two commands above recreate it.
 
 ```bash
 # 1. Start services
-docker-compose up -d
+docker compose up -d
 
 # 2. Check health
 curl http://localhost:8081/actuator/health
