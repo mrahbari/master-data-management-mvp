@@ -25,6 +25,13 @@ cd mdm-mvp
 docker-compose up --build
 ```
 
+> **⚠️ Docker Network Error:** If you see `Network "master-data-management-mvp_default" needs to be recreated`, run:
+> ```bash
+> docker-compose down --remove-orphans
+> docker-compose up --build
+> ```
+> The helper scripts (`scripts/run.sh`, `scripts/dev.sh`) detect this automatically.
+
 **Services will start:**
 - Kafka (port 9092)
 - PostgreSQL (port 5432)
@@ -312,6 +319,27 @@ mdm-mvp/
     ├── dev.sh
     └── test-api.sh
 ```
+
+---
+
+## 🔧 Troubleshooting
+
+### Docker Network Recreation Error
+
+```
+ERROR: Network "master-data-management-mvp_default" needs to be recreated - option "com.docker.network.enable_ipv6" has changed
+```
+
+**Fix:**
+```bash
+docker-compose down --remove-orphans
+docker-compose up --build
+```
+
+This happens when Docker's internal IPv4/IPv6 defaults change but the existing
+network keeps the old config. The `docker-compose.yml` now explicitly sets
+`com.docker.network.enable_ipv6: "false"` to prevent this permanently, but if
+an old broken network exists, the two commands above recreate it.
 
 ---
 

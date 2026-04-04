@@ -42,8 +42,10 @@ services:
       POSTGRES_DB: mdm_db
       POSTGRES_USER: mdm_user
       POSTGRES_PASSWORD: mdm_password
+      POSTGRES_MULTIPLE_DATABASES: mdm_db,mdm_ingestion
     volumes:
-      - ./k8s/db-init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./k8s/db-init.sql:/docker-entrypoint-initdb.d/01-init-schema.sql
+      - ./config/create-databases.sh:/docker-entrypoint-initdb.d/00-create-databases.sh
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mdm_user -d mdm_db"]
@@ -57,12 +59,19 @@ services:
       - "8080:8080"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      LOG_LEVEL: INFO
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: mdm_ingestion
+      DB_USERNAME: mdm_user
+      DB_PASSWORD: mdm_password
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://host.docker.internal:9999
+      LOG_LEVEL: INFO
     depends_on:
       oauth-server:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "-s", "http://localhost:8080/actuator/health"]
@@ -98,3 +107,9 @@ services:
 
 volumes:
   postgres-data:
+
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.enable_ipv6: "false"

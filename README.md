@@ -611,11 +611,36 @@ See **[ROADMAP.md](docs/ROADMAP.md)** for the complete implementation plan.
 
 ### Local Testing (Docker Compose)
 ```bash
+# Start all services
+docker-compose up --build -d
+
+# Or start only infrastructure and run services locally
 docker-compose up -d kafka postgres
-# Then run services locally or build Docker images
 ```
 
 ### Metrics Endpoint
 ```bash
 curl http://localhost:8080/actuator/prometheus
 ```
+
+---
+
+## Troubleshooting
+
+### Docker Network Error
+
+If you see:
+```
+ERROR: Network "master-data-management-mvp_default" needs to be recreated - option "com.docker.network.enable_ipv6" has changed
+```
+
+**Run:**
+```bash
+docker-compose down --remove-orphans
+docker-compose up --build -d
+```
+
+The `docker-compose.yml` explicitly sets `com.docker.network.enable_ipv6: "false"` to
+prevent this, but if an old broken network already exists, the two commands above
+recreate it. The helper scripts (`scripts/run.sh`, `scripts/dev.sh`) detect this error
+automatically and handle it for you.

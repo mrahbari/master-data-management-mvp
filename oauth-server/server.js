@@ -13,6 +13,22 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Generate RSA key pair for JWT signing
+const rsaKey = crypto.generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  publicKeyEncoding: {
+    type: 'spki',
+    format: 'pem'
+  },
+  privateKeyEncoding: {
+    type: 'pkcs8',
+    format: 'pem'
+  }
+});
+
+const privateKey = crypto.createPrivateKey(rsaKey.privateKey);
+const publicKey = crypto.createPublicKey(rsaKey.publicKey);
+
 // JWT Helper functions
 function base64UrlEncode(str) {
   return str.toString('base64')
@@ -21,13 +37,18 @@ function base64UrlEncode(str) {
     .replace(/=/g, '');
 }
 
-function createJWT(payload, secret = 'oauth-server-secret') {
-  const header = { alg: 'HS256', typ: 'JWT' };
+function createRS256JWT(payload) {
+  const header = { alg: 'RS256', typ: 'JWT', kid: 'oauth-server-rsa-key' };
   const encodedHeader = base64UrlEncode(Buffer.from(JSON.stringify(header)));
   const encodedPayload = base64UrlEncode(Buffer.from(JSON.stringify(payload)));
   const signatureInput = `${encodedHeader}.${encodedPayload}`;
-  const signature = crypto.createHmac('sha256', secret).update(signatureInput).digest();
+  
+  const sign = crypto.createSign('RSA-SHA256');
+  sign.update(signatureInput);
+  sign.end();
+  const signature = sign.sign(privateKey);
   const encodedSignature = base64UrlEncode(Buffer.from(signature));
+  
   return `${encodedHeader}.${encodedPayload}.${encodedSignature}`;
 }
 
@@ -55,7 +76,7 @@ app.post('/oauth/token', (req, res) => {
     }
     
     const now = Math.floor(Date.now() / 1000);
-    const accessToken = createJWT({
+    const accessToken = createRS256JWT({
       sub: user.username,
       roles: user.roles,
       aud: 'mdm-api',
@@ -65,8 +86,8 @@ app.post('/oauth/token', (req, res) => {
       jti: `access-${username}-${now}`,
       scope: scope || ''
     });
-    
-    const refreshToken = createJWT({
+
+    const refreshToken = createRS256JWT({
       sub: user.username,
       type: 'refresh',
       exp: now + 86400 * 7,
@@ -87,7 +108,7 @@ app.post('/oauth/token', (req, res) => {
   } else if (grant_type === 'client_credentials') {
     // Client Credentials
     const now = Math.floor(Date.now() / 1000);
-    const accessToken = createJWT({
+    const accessToken = createRS256JWT({
       sub: client_id,
       roles: ['ADMIN'],
       aud: 'mdm-api',
@@ -197,11 +218,17 @@ app.get('/oauth/userinfo', (req, res) => {
 
 // JWKS Endpoint (for OAuth2 resource servers)
 app.get('/.well-known/jwks.json', (req, res) => {
+  // Export public key as JWK
+  const jwk = publicKey.export({ type: 'jwk', format: 'jwk' });
+  
   res.json({
     keys: [{
-      kty: 'oct',
-      kid: 'oauth-server-key',
-      k: base64UrlEncode(Buffer.from('oauth-server-secret'))
+      kty: 'RSA',
+      kid: 'oauth-server-rsa-key',
+      use: 'sig',
+      alg: 'RS256',
+      n: jwk.n,
+      e: jwk.e
     }]
   });
 });

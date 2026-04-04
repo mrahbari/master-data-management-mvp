@@ -28,15 +28,21 @@ print_success() {
 # Stop Docker Compose
 stop_docker_compose() {
     print_status "Stopping Docker Compose services..."
-    
+
     cd "$PROJECT_DIR"
-    
+
     if [ -f "docker-compose.yml" ]; then
+        # Try docker compose (v2) first, fall back to docker-compose (v1)
+        local compose_cmd=""
         if docker compose version &> /dev/null; then
-            docker compose down
+            compose_cmd="docker compose"
         else
-            docker-compose down
+            compose_cmd="docker-compose"
         fi
+
+        # --remove-orphans ensures stale containers and networks are cleaned up
+        # This prevents "Network needs to be recreated" errors on next start
+        $compose_cmd down --remove-orphans
         print_success "Docker Compose services stopped"
     else
         print_status "docker-compose.yml not found, skipping..."

@@ -73,8 +73,13 @@ echo ""
 
 cd "$PROJECT_DIR"
 
-# Start only Kafka and PostgreSQL
-docker-compose up -d kafka postgres
+# Start only Kafka and PostgreSQL. Handle network recreation automatically.
+OUTPUT=$(docker-compose up -d kafka postgres 2>&1)
+if echo "$OUTPUT" | grep -q "needs to be recreated"; then
+    print_warning "Docker network configuration changed. Recreating network..."
+    docker-compose down --remove-orphans
+    docker-compose up -d kafka postgres
+fi
 
 print_status "Waiting for Kafka to be ready..."
 max_attempts=30

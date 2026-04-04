@@ -35,6 +35,38 @@ kafka:
   topics:
     customer-raw: customer.raw
     customer-mastered: customer.mastered
+    customer-dlq: customer.dlq
+  retry:
+    max-attempts: 3
+    initial-interval: 1000
+    max-interval: 10000
+    multiplier: 2.0
+    retryable-exceptions:
+      - org.springframework.dao.DeadlockLoserDataAccessException
+      - org.springframework.dao.QueryTimeoutException
+      - java.sql.SQLTransientException
+
+mdm:
+  mastering:
+    retry:
+      maxAttempts: 3
+      backoff:
+        initialInterval: 1000
+        maxInterval: 10000
+        multiplier: 2.0
+      retryableExceptions:
+        - org.springframework.dao.DeadlockLoserDataAccessException
+        - org.springframework.dao.QueryTimeoutException
+        - java.sql.SQLTransientException
+    dlq:
+      topic: customer.dlq
+      alert:
+        enabled: true
+        thresholdPercent: 1.0
+        evaluationWindowSeconds: 300
+        channels:
+          - email
+          - prometheus
 
 # ===========================================
 # OBSERVABILITY CONFIGURATION
@@ -119,3 +151,9 @@ logging:
     io.micrometer: DEBUG
   json:
     enabled: ${LOG_JSON:false}
+  file:
+    name: ./logs/mastering.log
+  logback:
+    rollingpolicy:
+      max-file-size: 10MB
+      max-history: 30
