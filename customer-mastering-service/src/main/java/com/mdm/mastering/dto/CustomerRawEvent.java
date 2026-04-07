@@ -25,6 +25,7 @@ import lombok.NoArgsConstructor;
 public class CustomerRawEvent {
 
   private UUID eventId;
+  private Long eventVersion;
   private String nationalId;
   private String name;
   private String email;

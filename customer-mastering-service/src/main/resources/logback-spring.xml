@@ -4,7 +4,7 @@
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
     <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
 
-    <springProperty name="LOG_PATH" source="logging.file.path" defaultValue="/app/logs"/>
+    <springProperty name="LOG_PATH" source="logging.file.path" defaultValue="./logs"/>
 
     <!-- Main application log file -->
     <appender name="MAIN_FILE" class="ch.qos.logback.core.FileAppender">
@@ -38,6 +38,14 @@
         </encoder>
     </appender>
 
+    <!-- Stale events log file -->
+    <appender name="STALE_EVENTS_FILE" class="ch.qos.logback.core.FileAppender">
+        <file>${LOG_PATH}/stale-events.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
     <!-- Conflict Resolution logger -->
     <logger name="com.mdm.mastering.conflict" level="INFO" additivity="false">
         <appender-ref ref="CONFLICT_FILE"/>
@@ -53,6 +61,12 @@
     <!-- DLQ logger -->
     <logger name="com.mdm.mastering.dlq" level="INFO" additivity="false">
         <appender-ref ref="DLQ_FILE"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <!-- Stale events logger -->
+    <logger name="com.mdm.mastering.stale" level="WARN" additivity="false">
+        <appender-ref ref="STALE_EVENTS_FILE"/>
         <appender-ref ref="CONSOLE"/>
     </logger>
 

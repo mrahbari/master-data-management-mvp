@@ -27,7 +27,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * DLQ Management Controller for inspecting and reprocessing Dead Letter Queue messages [Only Demo purpose!].
+ * DLQ Management Controller for inspecting and reprocessing Dead Letter Queue messages [Only Demo
+ * purpose!].
  *
  * <p>Provides HTTP endpoints to:
  *

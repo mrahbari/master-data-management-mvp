@@ -12,6 +12,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,6 +54,8 @@ public class GoldenRecordService {
   private final MdmSliMetrics metrics;
   private final ConflictResolutionService conflictResolutionService;
   private final ConflictLogger conflictLogger;
+  private final StaleEventChecker staleEventChecker;
+  private final StaleEventLogger staleEventLogger;
   private final ObjectMapper objectMapper;
 
   public GoldenRecordService(
@@ -61,13 +64,17 @@ public class GoldenRecordService {
       MdmProcessingHealthIndicator healthIndicator,
       MdmSliMetrics metrics,
       ConflictResolutionService conflictResolutionService,
-      ConflictLogger conflictLogger) {
+      ConflictLogger conflictLogger,
+      StaleEventChecker staleEventChecker,
+      StaleEventLogger staleEventLogger) {
     this.goldenRepository = goldenRepository;
     this.eventProducer = eventProducer;
     this.healthIndicator = healthIndicator;
     this.metrics = metrics;
     this.conflictResolutionService = conflictResolutionService;
     this.conflictLogger = conflictLogger;
+    this.staleEventChecker = staleEventChecker;
+    this.staleEventLogger = staleEventLogger;
     this.objectMapper = new ObjectMapper();
   }
 
@@ -78,10 +85,21 @@ public class GoldenRecordService {
    */
   @Transactional
   public void processCustomerEvent(CustomerRawEvent event) {
-    metrics.recordProcessing(() -> processEventInternal(event));
+    metrics.recordProcessing(() -> processEventInternal(event, 0L));
   }
 
-  private void processEventInternal(CustomerRawEvent event) {
+  /**
+   * Processes a customer event with Kafka offset context for stale event logging.
+   *
+   * @param event the raw customer event from Kafka
+   * @param kafkaOffset the Kafka offset for audit logging
+   */
+  @Transactional
+  public void processCustomerEvent(CustomerRawEvent event, long kafkaOffset) {
+    metrics.recordProcessing(() -> processEventInternal(event, kafkaOffset));
+  }
+
+  private void processEventInternal(CustomerRawEvent event, long kafkaOffset) {
     String nationalId = normalizeNationalId(event.getNationalId());
 
     if (nationalId == null) {
@@ -93,7 +111,15 @@ public class GoldenRecordService {
       var existing = goldenRepository.findByNationalId(nationalId);
 
       if (existing.isPresent()) {
-        handleExistingCustomer(event, existing.get());
+        CustomerGoldenEntity golden = existing.get();
+
+        // Check if this is a stale event
+        if (staleEventChecker.isStale(event, golden)) {
+          handleStaleEvent(event, golden, kafkaOffset);
+          return;
+        }
+
+        handleExistingCustomer(event, golden);
       } else {
         handleNewCustomer(event, nationalId);
       }
@@ -113,6 +139,25 @@ public class GoldenRecordService {
     }
   }
 
+  /**
+   * Handles a stale event by logging it and recording metrics. The event is acknowledged (not
+   * retried) to prevent reprocessing.
+   */
+  private void handleStaleEvent(
+      CustomerRawEvent event, CustomerGoldenEntity existing, long kafkaOffset) {
+    log.info(
+        "Stale event detected (skipping): nationalId={}, eventVersion={}, currentVersion={}, eventId={}",
+        maskNationalId(event.getNationalId()),
+        event.getEventVersion(),
+        existing.getEventVersion(),
+        event.getEventId());
+
+    staleEventLogger.logStaleEvent(event, existing, kafkaOffset);
+    metrics.recordStaleEvent();
+  }
+
+  private static final int MAX_OPTIMISTIC_LOCK_RETRIES = 3;
+
   private void handleExistingCustomer(CustomerRawEvent event, CustomerGoldenEntity existing) {
     log.info(
         "Duplicate detected: nationalId={}, eventId={}, goldenRecordId={}",
@@ -123,11 +168,62 @@ public class GoldenRecordService {
     metrics.recordDuplicate();
     healthIndicator.recordProcessing(true);
 
-    CustomerGoldenEntity updated = mergeGoldenRecord(existing, event);
-    goldenRepository.save(updated);
+    // Handle with optimistic lock retry
+    CustomerGoldenEntity updated = mergeWithOptimisticRetry(existing, event);
 
     metrics.recordGoldenRecordUpdated();
     publishMasteredEvent(updated, event, CustomerMasteredEvent.MasteringAction.UPDATED);
+  }
+
+  /**
+   * Merges the event into the existing golden record with optimistic lock retry.
+   *
+   * <p>On OptimisticLockException, reloads the record and retries up to MAX_OPTIMISTIC_LOCK_RETRIES
+   * times.
+   */
+  private CustomerGoldenEntity mergeWithOptimisticRetry(
+      CustomerGoldenEntity existing, CustomerRawEvent event) {
+
+    int retryCount = 0;
+    String nationalId = existing.getNationalId();
+
+    while (retryCount < MAX_OPTIMISTIC_LOCK_RETRIES) {
+      try {
+        CustomerGoldenEntity updated = mergeGoldenRecord(existing, event);
+        return goldenRepository.save(updated);
+      } catch (ObjectOptimisticLockingFailureException ex) {
+        retryCount++;
+        metrics.recordOptimisticLockFailure();
+
+        log.warn(
+            "Optimistic lock contention for nationalId={}, retry {}/{}",
+            maskNationalId(nationalId),
+            retryCount,
+            MAX_OPTIMISTIC_LOCK_RETRIES);
+
+        if (retryCount >= MAX_OPTIMISTIC_LOCK_RETRIES) {
+          throw new ClassifiedException(
+              "Optimistic lock retry exhausted for nationalId=" + maskNationalId(nationalId),
+              ErrorType.TRANSIENT);
+        }
+
+        // Reload the latest version and retry
+        existing =
+            goldenRepository
+                .findByNationalId(nationalId)
+                .orElseThrow(
+                    () ->
+                        new ClassifiedException(
+                            "Golden record not found during retry: nationalId="
+                                + maskNationalId(nationalId),
+                            ErrorType.PERMANENT));
+      }
+    }
+
+    // Should never reach here, but just in case
+    throw new ClassifiedException(
+        "Unexpected exit from optimistic lock retry for nationalId=" + maskNationalId(nationalId),
+        ErrorType.TRANSIENT);
   }
 
   private void handleNewCustomer(CustomerRawEvent event, String nationalId) {
@@ -153,6 +249,9 @@ public class GoldenRecordService {
         .phone(event.getPhone())
         .confidenceScore((short) 100)
         .version(1L)
+        .eventVersion(event.getEventVersion() != null ? event.getEventVersion() : 1L)
+        .lastProcessedEventTimestamp(
+            event.getTimestamp() != null ? event.getTimestamp() : Instant.now())
         .createdAt(Instant.now())
         .updatedAt(Instant.now())
         .lastSourceSystem(event.getSourceSystem())
@@ -210,7 +309,12 @@ public class GoldenRecordService {
     existing.setPhone(serializePhone(phoneResolution));
     existing.setLastSourceSystem(event.getSourceSystem());
     existing.setUpdatedAt(Instant.now());
-    existing.setVersion(existing.getVersion() + 1);
+    existing.setEventVersion(
+        event.getEventVersion() != null
+            ? event.getEventVersion()
+            : (existing.getEventVersion() != null ? existing.getEventVersion() + 1 : 1L));
+    existing.setLastProcessedEventTimestamp(
+        event.getTimestamp() != null ? event.getTimestamp() : Instant.now());
 
     return existing;
   }

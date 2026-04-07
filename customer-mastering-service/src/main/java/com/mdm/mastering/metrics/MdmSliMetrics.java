@@ -45,6 +45,12 @@ public class MdmSliMetrics {
   // SLI: Processing errors (Counter)
   private final Counter processingErrorsCounter;
 
+  // Out-of-order event handling: stale events detected
+  private final Counter staleEventsTotalCounter;
+
+  // Out-of-order event handling: optimistic lock failures
+  private final Counter optimisticLockFailuresTotalCounter;
+
   // SLI: Throughput tracking (AtomicLong for thread-safety)
   private final AtomicLong totalEventsProcessed = new AtomicLong(0);
   private final FunctionCounter eventsProcessedCounter;
@@ -102,6 +108,18 @@ public class MdmSliMetrics {
             .description("Total event processing errors (SLO: error rate < 0.1%)")
             .register(meterRegistry);
 
+    // Out-of-order: stale events total
+    this.staleEventsTotalCounter =
+        Counter.builder("stale_events_total")
+            .description("Total stale/out-of-order events detected and acknowledged")
+            .register(meterRegistry);
+
+    // Out-of-order: optimistic lock failures total
+    this.optimisticLockFailuresTotalCounter =
+        Counter.builder("optimistic_lock_failures_total")
+            .description("Total optimistic locking contention failures during retries")
+            .register(meterRegistry);
+
     // SLI-007: Throughput
     this.eventsProcessedCounter =
         FunctionCounter.builder("mdm.events_processed_total", totalEventsProcessed, AtomicLong::get)
@@ -156,6 +174,16 @@ public class MdmSliMetrics {
   /** Record a processing error (if not already recorded by recordProcessing). */
   public void recordError() {
     processingErrorsCounter.increment();
+  }
+
+  /** Record a stale event that was detected and acknowledged. */
+  public void recordStaleEvent() {
+    staleEventsTotalCounter.increment();
+  }
+
+  /** Record an optimistic lock contention failure. */
+  public void recordOptimisticLockFailure() {
+    optimisticLockFailuresTotalCounter.increment();
   }
 
   /**

@@ -39,7 +39,9 @@ public class DlqProducer {
   private static final String HEADER_RETRY_COUNT = "X-Retry-Count";
   private static final String HEADER_TIMESTAMP = "X-Original-Timestamp";
   private static final String HEADER_SCHEMA_VERSION = "X-Schema-Version";
+  private static final String HEADER_EVENT_TYPE = "X-Event-Type";
   private static final String SCHEMA_VERSION = "v1";
+  private static final String EVENT_TYPE_STALE = "STALE_EVENT";
 
   private final KafkaTemplate<String, String> kafkaTemplate;
   private final ObjectMapper objectMapper;
@@ -111,6 +113,86 @@ public class DlqProducer {
               }
             });
   }
+
+  /**
+   * Sends a stale event to the DLQ for audit purposes. Unlike error DLQ messages, this is not an
+   * error — the event is simply recorded for auditing since it was superseded by a newer event.
+   *
+   * @param event the stale event
+   * @param currentVersion the current golden record version
+   * @param kafkaOffset the Kafka offset of the stale event
+   */
+  public void sendStaleEventToDlqForAudit(
+      CustomerRawEvent event, Long currentVersion, long kafkaOffset) {
+
+    String payload;
+    try {
+      payload =
+          objectMapper.writeValueAsString(
+              new StaleEventAuditWrapper(
+                  event.getEventId(),
+                  event.getNationalId(),
+                  event.getEventVersion(),
+                  currentVersion,
+                  event.getTimestamp(),
+                  kafkaOffset));
+    } catch (JsonProcessingException ex) {
+      log.error(
+          "Failed to serialize stale event for audit: eventId={}: {}",
+          event.getEventId(),
+          ex.getMessage(),
+          ex);
+      payload = "{}";
+    }
+
+    Headers headers = buildStaleEventHeaders(event, kafkaOffset);
+    String key =
+        event.getNationalId() != null ? event.getNationalId() : UUID.randomUUID().toString();
+
+    ProducerRecord<String, String> record =
+        new ProducerRecord<>(dlqTopic, null, key, payload, headers);
+    kafkaTemplate
+        .send(record)
+        .whenComplete(
+            (result, ex) -> {
+              if (ex == null) {
+                log.info(
+                    "Sent stale event to DLQ for audit: topic={}, partition={}, offset={}, "
+                        + "eventId={}, eventVersion={}, currentVersion={}",
+                    dlqTopic,
+                    result.getRecordMetadata().partition(),
+                    result.getRecordMetadata().offset(),
+                    event.getEventId(),
+                    event.getEventVersion(),
+                    currentVersion);
+              } else {
+                log.error(
+                    "Failed to send stale event to DLQ for audit: eventId={}, error={}",
+                    event.getEventId(),
+                    ex.getMessage(),
+                    ex);
+              }
+            });
+  }
+
+  private Headers buildStaleEventHeaders(CustomerRawEvent event, long offset) {
+    Headers headers = new RecordHeaders();
+    headers.add(HEADER_ORIGINAL_TOPIC, "customer.raw".getBytes());
+    headers.add(HEADER_OFFSET, serializeLong(offset));
+    headers.add(HEADER_EVENT_TYPE, EVENT_TYPE_STALE.getBytes());
+    headers.add(HEADER_TIMESTAMP, Instant.now().toString().getBytes());
+    headers.add(HEADER_SCHEMA_VERSION, SCHEMA_VERSION.getBytes());
+    return headers;
+  }
+
+  /** Lightweight wrapper for stale event audit data. */
+  private record StaleEventAuditWrapper(
+      UUID eventId,
+      String nationalId,
+      Long eventVersion,
+      Long currentGoldenVersion,
+      Instant eventTimestamp,
+      long kafkaOffset) {}
 
   private Headers buildDlqHeaders(
       CustomerRawEvent event,

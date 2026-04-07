@@ -42,6 +42,12 @@ public class CustomerGoldenEntity {
   @Column(nullable = false)
   private Long version;
 
+  @Column(name = "event_version")
+  private Long eventVersion;
+
+  @Column(name = "last_processed_event_timestamp")
+  private Instant lastProcessedEventTimestamp;
+
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 

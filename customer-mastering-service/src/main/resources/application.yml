@@ -86,6 +86,8 @@ mdm:
           strategy: TRUSTED_SOURCE
           trustedSources:
             - CRM
+    stale-events:
+      publish-to-dlq: ${STALE_EVENTS_PUBLISH_TO_DLQ:false}
 
 # ===========================================
 # OBSERVABILITY CONFIGURATION
@@ -171,7 +173,7 @@ logging:
   json:
     enabled: ${LOG_JSON:false}
   file:
-    path: ${LOG_PATH:/app/logs}
+    path: ${LOG_PATH:./logs}
   logback:
     rollingpolicy:
       max-file-size: 10MB

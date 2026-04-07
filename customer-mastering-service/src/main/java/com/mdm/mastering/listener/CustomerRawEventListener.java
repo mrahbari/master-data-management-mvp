@@ -177,7 +177,7 @@ public class CustomerRawEventListener {
     rawRepository.save(rawEntity);
 
     // Process for golden record creation/update
-    goldenRecordService.processCustomerEvent(event);
+    goldenRecordService.processCustomerEvent(event, offset);
 
     logRetry(event, 0, null, true);
   }
