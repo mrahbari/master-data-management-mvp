@@ -1,5 +1,7 @@
 # MDM MVP - Customer Master Data Management
 
+> **📋 Design Documentation:** For a detailed architecture, data models, and design decisions, see [DESIGN-PLAN.md](DESIGN-PLAN.md).
+
 ## 1. Problem Definition
 
 ### What is MDM?
@@ -685,6 +687,18 @@ docker compose up -d kafka postgres
 ```bash
 curl http://localhost:8080/actuator/prometheus
 ```
+
+---
+
+## 📚 Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [README.md](README.md) | Project overview, architecture summary, quick reference |
+| [DESIGN-PLAN.md](DESIGN-PLAN.md) | Detailed architecture, ER diagrams, SQL DDL, sequence diagrams, security design |
+| [QUICKSTART.md](QUICKSTART.md) | Quick start guide |
+| [HOW-TO-RUN.md](HOW-TO-RUN.md) | Detailed run instructions |
+| [RUN-WITHOUT-DOCKER.md](RUN-WITHOUT-DOCKER.md) | Local development without Docker |
 
 ---
 
