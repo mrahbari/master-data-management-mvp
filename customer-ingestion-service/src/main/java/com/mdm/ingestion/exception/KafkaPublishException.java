@@ -21,7 +21,7 @@ public final class KafkaPublishException extends IngestionDomainException {
     this.keyHash = keyHash;
   }
 
-    private static String maskKey(String key) {
+  private static String maskKey(String key) {
     if (key == null || key.length() <= 8) {
       return "***";
     }

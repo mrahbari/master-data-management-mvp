@@ -6,6 +6,7 @@ package com.mdm.ingestion.dto;
 
 import java.time.Instant;
 import java.util.UUID;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -15,17 +16,19 @@ import lombok.NoArgsConstructor;
  * Represents a raw customer event published to Kafka.
  *
  * <p>This DTO is designed to be immutable after construction:
+ *
  * <ul>
- *   <li>Uses {@code @Getter} instead of {@code @Data} to avoid generating setters</li>
- *   <li>Builder pattern enforces complete construction</li>
- *   <li>All fields are final via the builder</li>
+ *   <li>Uses {@code @Getter} instead of {@code @Data} to avoid generating setters
+ *   <li>Builder pattern enforces complete construction
+ *   <li>All fields are final via the builder
  * </ul>
  *
  * <p>The {@code nationalId} field serves as the canonical unique identifier:
+ *
  * <ul>
- *   <li>Used as the Kafka partition key for ordering guarantees</li>
- *   <li>Used for idempotency deduplication</li>
- *   <li>Stored in the event payload for downstream processing</li>
+ *   <li>Used as the Kafka partition key for ordering guarantees
+ *   <li>Used for idempotency deduplication
+ *   <li>Stored in the event payload for downstream processing
  * </ul>
  */
 @Getter
@@ -43,9 +46,7 @@ public class CustomerRawEvent {
   private Instant timestamp;
   private Metadata metadata;
 
-  /**
-   * Metadata associated with the ingestion event.
-   */
+  /** Metadata associated with the ingestion event. */
   @Getter
   @Builder
   @NoArgsConstructor

@@ -7,6 +7,7 @@ package com.mdm.ingestion.service;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 
+import com.mdm.ingestion.util.SensitiveDataMasker;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.Headers;
@@ -59,10 +60,7 @@ public class CustomerKafkaProducer {
   }
 
   private String maskKey(String key) {
-    if (key == null || key.length() <= 8) {
-      return "***";
-    }
-    return key.substring(0, 4) + "..." + key.substring(key.length() - 4);
+      return SensitiveDataMasker.maskHash(key);
   }
 
   private Headers buildHeaders(CustomerRawEvent event, String idempotencyKey, String eventVersion) {

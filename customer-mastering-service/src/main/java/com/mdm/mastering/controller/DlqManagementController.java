@@ -12,6 +12,7 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -27,7 +28,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * DLQ Management Controller for inspecting and reprocessing Dead Letter Queue messages [Only Demo purpose!].
+ * DLQ Management Controller for inspecting and reprocessing Dead Letter Queue messages [Only Demo
+ * purpose!].
  *
  * <p>Provides HTTP endpoints to:
  *
@@ -98,6 +100,7 @@ public class DlqManagementController {
    * @param dlqEvent the DLQ event containing the original event and error details
    * @return reprocessing result
    */
+  @PreAuthorize("hasRole('ADMIN')")
   @PostMapping("/reprocess")
   public ResponseEntity<Map<String, Object>> reprocessDlqMessage(@RequestBody DlqEvent dlqEvent) {
     Map<String, Object> result = new HashMap<>();

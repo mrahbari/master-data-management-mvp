@@ -4,6 +4,7 @@
  */
 package com.mdm.mastering.service;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +31,7 @@ import com.mdm.mastering.exception.ErrorType;
 import com.mdm.mastering.health.MdmProcessingHealthIndicator;
 import com.mdm.mastering.metrics.MdmSliMetrics;
 import com.mdm.mastering.repository.CustomerGoldenRepository;
+import com.mdm.mastering.util.SensitiveDataMasker;
 
 /**
  * Core MDM service for golden record management.
@@ -54,6 +56,7 @@ public class GoldenRecordService {
   private final ConflictResolutionService conflictResolutionService;
   private final ConflictLogger conflictLogger;
   private final ObjectMapper objectMapper;
+  private final Clock clock;
 
   public GoldenRecordService(
       CustomerGoldenRepository goldenRepository,
@@ -61,14 +64,17 @@ public class GoldenRecordService {
       MdmProcessingHealthIndicator healthIndicator,
       MdmSliMetrics metrics,
       ConflictResolutionService conflictResolutionService,
-      ConflictLogger conflictLogger) {
+      ConflictLogger conflictLogger,
+      ObjectMapper objectMapper,
+      Clock clock) {
     this.goldenRepository = goldenRepository;
     this.eventProducer = eventProducer;
     this.healthIndicator = healthIndicator;
     this.metrics = metrics;
     this.conflictResolutionService = conflictResolutionService;
     this.conflictLogger = conflictLogger;
-    this.objectMapper = new ObjectMapper();
+    this.objectMapper = objectMapper;
+    this.clock = clock;
   }
 
   /**
@@ -99,7 +105,8 @@ public class GoldenRecordService {
       }
     } catch (DataIntegrityViolationException ex) {
       throw new ClassifiedException(
-          "Data integrity violation for nationalId=" + maskNationalId(nationalId),
+          "Data integrity violation for nationalId="
+              + SensitiveDataMasker.maskNationalId(nationalId),
           ErrorType.PERMANENT,
           ex);
     } catch (Exception ex) {
@@ -107,7 +114,8 @@ public class GoldenRecordService {
         throw ex;
       }
       throw new ClassifiedException(
-          "Unexpected error processing event for nationalId=" + maskNationalId(nationalId),
+          "Unexpected error processing event for nationalId="
+              + SensitiveDataMasker.maskNationalId(nationalId),
           ErrorType.TRANSIENT,
           ex);
     }
@@ -116,7 +124,7 @@ public class GoldenRecordService {
   private void handleExistingCustomer(CustomerRawEvent event, CustomerGoldenEntity existing) {
     log.info(
         "Duplicate detected: nationalId={}, eventId={}, goldenRecordId={}",
-        maskNationalId(event.getNationalId()),
+        SensitiveDataMasker.maskNationalId(event.getNationalId()),
         event.getEventId(),
         existing.getId());
 
@@ -133,7 +141,7 @@ public class GoldenRecordService {
   private void handleNewCustomer(CustomerRawEvent event, String nationalId) {
     log.info(
         "Creating new golden record: nationalId={}, eventId={}",
-        maskNationalId(nationalId),
+        SensitiveDataMasker.maskNationalId(nationalId),
         event.getEventId());
 
     CustomerGoldenEntity newRecord = createGoldenRecord(event, nationalId);
@@ -153,8 +161,8 @@ public class GoldenRecordService {
         .phone(event.getPhone())
         .confidenceScore((short) 100)
         .version(1L)
-        .createdAt(Instant.now())
-        .updatedAt(Instant.now())
+        .createdAt(Instant.now(clock))
+        .updatedAt(Instant.now(clock))
         .lastSourceSystem(event.getSourceSystem())
         .build();
   }
@@ -168,7 +176,8 @@ public class GoldenRecordService {
   private CustomerGoldenEntity mergeGoldenRecord(
       CustomerGoldenEntity existing, CustomerRawEvent event) {
     String nationalId = existing.getNationalId();
-    Instant eventTimestamp = event.getTimestamp() != null ? event.getTimestamp() : Instant.now();
+    Instant eventTimestamp =
+        event.getTimestamp() != null ? event.getTimestamp() : Instant.now(clock);
     Instant existingTimestamp = existing.getUpdatedAt();
 
     // Resolve each field using the conflict resolution service
@@ -209,7 +218,7 @@ public class GoldenRecordService {
     existing.setEmail((String) emailResolution.resolvedValue());
     existing.setPhone(serializePhone(phoneResolution));
     existing.setLastSourceSystem(event.getSourceSystem());
-    existing.setUpdatedAt(Instant.now());
+    existing.setUpdatedAt(Instant.now(clock));
     existing.setVersion(existing.getVersion() + 1);
 
     return existing;
@@ -369,7 +378,7 @@ public class GoldenRecordService {
             .email(golden.getEmail())
             .phone(golden.getPhone())
             .action(action)
-            .timestamp(Instant.now())
+            .timestamp(Instant.now(clock))
             .build();
 
     eventProducer.publish(masteredEvent);
@@ -380,12 +389,5 @@ public class GoldenRecordService {
       return null;
     }
     return nationalId.trim().replaceAll("[^a-zA-Z0-9]", "");
-  }
-
-  private static String maskNationalId(String nationalId) {
-    if (nationalId == null || nationalId.length() <= 4) {
-      return "***";
-    }
-    return "***" + nationalId.substring(nationalId.length() - 4);
   }
 }

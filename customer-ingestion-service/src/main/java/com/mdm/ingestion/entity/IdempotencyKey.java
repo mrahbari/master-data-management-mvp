@@ -4,6 +4,10 @@
  */
 package com.mdm.ingestion.entity;
 
+import java.time.Instant;
+import java.util.Objects;
+import java.util.UUID;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -13,9 +17,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
-import java.time.Instant;
-import java.util.Objects;
-import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -24,29 +25,28 @@ import lombok.NoArgsConstructor;
  * Represents an idempotency key used to deduplicate ingestion requests.
  *
  * <p>This entity follows SOLID principles:
+ *
  * <ul>
- *   <li><b>Single Responsibility:</b> Only manages idempotency state</li>
- *   <li><b>Open/Closed:</b> Domain behavior methods extend functionality without modification</li>
- *   <li><b>Liskov Substitution:</b> Proper equals/hashCode for JPA identity</li>
- *   <li><b>Interface Segregation:</b> Minimal mutable state, factory method for creation</li>
- *   <li><b>Dependency Inversion:</b> Clock injected via factory method for testability</li>
+ *   <li><b>Single Responsibility:</b> Only manages idempotency state
+ *   <li><b>Open/Closed:</b> Domain behavior methods extend functionality without modification
+ *   <li><b>Liskov Substitution:</b> Proper equals/hashCode for JPA identity
+ *   <li><b>Interface Segregation:</b> Minimal mutable state, factory method for creation
+ *   <li><b>Dependency Inversion:</b> Clock injected via factory method for testability
  * </ul>
  */
 @Entity
 @Table(
     name = "ingestion_idempotency_keys",
     indexes = {
-        @Index(name = "idx_idempotency_key_hash", columnList = "key_hash", unique = true),
-        @Index(name = "idx_idempotency_client_key", columnList = "client_idempotency_key"),
-        @Index(name = "idx_idempotency_expires_at", columnList = "expires_at")
+      @Index(name = "idx_idempotency_key_hash", columnList = "key_hash", unique = true),
+      @Index(name = "idx_idempotency_client_key", columnList = "client_idempotency_key"),
+      @Index(name = "idx_idempotency_expires_at", columnList = "expires_at")
     })
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class IdempotencyKey {
 
-  @Id
-  @GeneratedValue
-  private UUID id;
+  @Id @GeneratedValue private UUID id;
 
   @Column(name = "key_hash", nullable = false, unique = true, length = 64)
   private String keyHash;
@@ -117,9 +117,9 @@ public class IdempotencyKey {
     this.status = IdempotencyStatus.COMPLETED;
   }
 
-  /** Domain behavior: mark this key as failed (treated as completed to prevent reprocessing). */
+  /** Domain behavior: mark this key as failed to allow retry after backoff. */
   public void markFailed() {
-    this.status = IdempotencyStatus.COMPLETED;
+    this.status = IdempotencyStatus.FAILED;
   }
 
   /** Check if this key has expired relative to the given time. */
@@ -158,12 +158,13 @@ public class IdempotencyKey {
 
   @Override
   public String toString() {
-    return "IdempotencyKey{keyHash='%s', status=%s, eventId=%s}".formatted(
-        keyHash, status, eventId);
+    return "IdempotencyKey{keyHash='%s', status=%s, eventId=%s}"
+        .formatted(keyHash, status, eventId);
   }
 
   public enum IdempotencyStatus {
     PROCESSING,
-    COMPLETED
+    COMPLETED,
+    FAILED
   }
 }

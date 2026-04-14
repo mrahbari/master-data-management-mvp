@@ -4,6 +4,8 @@
  */
 package com.mdm.mastering.metrics;
 
+import lombok.Getter;
+
 /**
  * Calculate SLO burn rate and error budget remaining.
  *
@@ -19,22 +21,22 @@ package com.mdm.mastering.metrics;
  * double budgetRemaining = calculator.calculateErrorBudgetRemaining(10000, 5);
  * }</pre>
  *
+ * @param sloTarget -- GETTER --
+ *                  Get SLO target.
+ *                  e.g., 99.9 for 99.9% SLO
  * @see <a href="https://sre.google/sre-book/monitoring-distributed-systems/">Google SRE Book</a>
  */
-public class BurnRateCalculator {
-
-  private final double sloTarget; // e.g., 99.9 for 99.9% SLO
+public record BurnRateCalculator(double sloTarget) {
 
   /**
    * Create burn rate calculator for given SLO target.
    *
    * @param sloTarget SLO target as percentage (e.g., 99.9 for 99.9%)
    */
-  public BurnRateCalculator(double sloTarget) {
+  public BurnRateCalculator {
     if (sloTarget <= 0 || sloTarget > 100) {
       throw new IllegalArgumentException("SLO target must be between 0 and 100: " + sloTarget);
     }
-    this.sloTarget = sloTarget;
   }
 
   /**
@@ -51,7 +53,7 @@ public class BurnRateCalculator {
    *   <li>0x = no errors, budget preserved
    * </ul>
    *
-   * @param totalRequests total number of requests
+   * @param totalRequests  total number of requests
    * @param failedRequests number of failed requests
    * @return burn rate multiplier (e.g., 5.0 = 5x burn rate)
    */
@@ -79,7 +81,7 @@ public class BurnRateCalculator {
    *
    * <p>Negative = already breached
    *
-   * @param totalRequests total number of requests
+   * @param totalRequests  total number of requests
    * @param failedRequests number of failed requests
    * @return error budget remaining (0-100%)
    */
@@ -150,21 +152,12 @@ public class BurnRateCalculator {
   /**
    * Check if current error rate is within SLO.
    *
-   * @param totalRequests total number of requests
+   * @param totalRequests  total number of requests
    * @param failedRequests number of failed requests
    * @return true if within SLO, false if breached
    */
   public boolean isWithinSlo(long totalRequests, long failedRequests) {
     return calculateErrorBudgetRemaining(totalRequests, failedRequests) > 0;
-  }
-
-  /**
-   * Get SLO target.
-   *
-   * @return SLO target as percentage
-   */
-  public double getSloTarget() {
-    return sloTarget;
   }
 
   /**
@@ -185,7 +178,10 @@ public class BurnRateCalculator {
     }
   }
 
-  /** Burn rate severity levels matching alert severity. */
+  /**
+   * Burn rate severity levels matching alert severity.
+   */
+  @Getter
   public enum Severity {
     CRITICAL("10x+ burn rate - Immediate action required"),
     HIGH("5x+ burn rate - Urgent attention needed"),
@@ -198,8 +194,5 @@ public class BurnRateCalculator {
       this.description = description;
     }
 
-    public String getDescription() {
-      return description;
-    }
   }
 }

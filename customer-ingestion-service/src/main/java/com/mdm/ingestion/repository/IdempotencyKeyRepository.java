@@ -24,6 +24,19 @@ public interface IdempotencyKeyRepository extends JpaRepository<IdempotencyKey, 
 
   Optional<IdempotencyKey> findByClientIdempotencyKey(String clientIdempotencyKey);
 
+  @Query(
+      value =
+          "SELECT * FROM ingestion_idempotency_keys WHERE key_hash = :keyHash FOR UPDATE SKIP LOCKED",
+      nativeQuery = true)
+  Optional<IdempotencyKey> findByKeyHashForUpdate(@Param("keyHash") String keyHash);
+
+  @Query(
+      value =
+          "SELECT * FROM ingestion_idempotency_keys WHERE client_idempotency_key = :clientKey FOR UPDATE SKIP LOCKED",
+      nativeQuery = true)
+  Optional<IdempotencyKey> findByClientIdempotencyKeyForUpdate(
+      @Param("clientKey") String clientKey);
+
   @Modifying
   @Query(
       value =
@@ -41,7 +54,8 @@ public interface IdempotencyKeyRepository extends JpaRepository<IdempotencyKey, 
       @Param("expiresAt") Instant expiresAt);
 
   @Modifying
-  @Query("UPDATE IdempotencyKey k SET k.status = :status WHERE k.keyHash = :keyHash")
-  void completeByKeyHash(
+  @Query(
+      "UPDATE IdempotencyKey k SET k.status = :status WHERE k.keyHash = :keyHash AND k.status = 'PROCESSING'")
+  int completeByKeyHash(
       @Param("keyHash") String keyHash, @Param("status") IdempotencyStatus status);
 }

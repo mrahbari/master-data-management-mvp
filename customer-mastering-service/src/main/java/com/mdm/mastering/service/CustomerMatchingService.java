@@ -7,6 +7,7 @@ package com.mdm.mastering.service;
 import java.util.List;
 
 import com.mdm.mastering.entity.CustomerGoldenEntity;
+import lombok.Getter;
 
 /**
  * Service interface for survivable customer matching.
@@ -28,6 +29,7 @@ public interface CustomerMatchingService {
   MatchResult findMatch(String email, String firstName, String lastName, String phone);
 
   /** Result of a customer matching attempt. */
+  @Getter
   class MatchResult {
     private final MatchType type;
     private final CustomerGoldenEntity matchedCustomer;
@@ -71,21 +73,6 @@ public interface CustomerMatchingService {
       return matchedCustomer != null;
     }
 
-    public MatchType getType() {
-      return type;
-    }
-
-    public CustomerGoldenEntity getMatchedCustomer() {
-      return matchedCustomer;
-    }
-
-    public double getMatchScore() {
-      return matchScore;
-    }
-
-    public List<String> getMatchedRules() {
-      return matchedRules;
-    }
   }
 
   enum MatchType {

@@ -122,7 +122,7 @@ public class SloEndpoint {
     result.put("timestamp", Instant.now().toString());
 
     // SLO target
-    result.put("sloTarget", String.format("%.2f%%", burnRateCalculator.getSloTarget()));
+    result.put("sloTarget", String.format("%.2f%%", burnRateCalculator.sloTarget()));
 
     return result;
   }

@@ -64,8 +64,12 @@ public class CustomerQueryService {
 
   /** Search customers by name. */
   public Page<CustomerQueryResponse> searchByName(String name, Pageable pageable) {
-    Page<CustomerGoldenEntity> entityPage = goldenRepository.findAll(pageable);
-    return entityPage.map(this::toQueryResponse);
+    if (name != null && !name.isBlank()) {
+      return goldenRepository
+          .findByNameContainingIgnoreCase(name, pageable)
+          .map(this::toQueryResponse);
+    }
+    return goldenRepository.findAll(pageable).map(this::toQueryResponse);
   }
 
   /** Check if customer exists by nationalId. */

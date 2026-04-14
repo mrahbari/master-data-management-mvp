@@ -5,6 +5,7 @@
 package com.mdm.mastering.service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.slf4j.Logger;
@@ -58,10 +59,11 @@ public class SurvivableMatchingServiceImpl implements CustomerMatchingService {
     // Use nationalId-based matching as primary, fall back to fuzzy matching
     String normalizedEmail = normalizeEmail(email);
 
-    Optional<CustomerGoldenEntity> exactMatch =
-        goldenRepository.findAll().stream()
-            .filter(c -> normalizedEmail != null && normalizedEmail.equalsIgnoreCase(c.getEmail()))
-            .findFirst();
+    // Use repository-level query instead of loading entire table into memory
+    Optional<CustomerGoldenEntity> exactMatch = Optional.empty();
+    if (normalizedEmail != null) {
+      exactMatch = goldenRepository.findByEmailIgnoreCase(normalizedEmail);
+    }
 
     if (exactMatch.isPresent()) {
       return MatchResult.duplicate(exactMatch.get(), 1.0, List.of("EMAIL_EXACT_MATCH"));
@@ -211,74 +213,71 @@ public class SurvivableMatchingServiceImpl implements CustomerMatchingService {
     return scoreEmailMatch(email1, email2);
   }
 
-  private static final java.util.Map<String, String> NICKNAME_MAP =
-      new java.util.HashMap<String, String>() {
-        {
-          put("john", "john");
-          put("jon", "john");
-          put("jonny", "john");
-          put("johnny", "john");
-          put("jack", "john");
-          put("jock", "john");
-          put("ian", "john");
-          put("robert", "robert");
-          put("rob", "robert");
-          put("bob", "robert");
-          put("bobby", "robert");
-          put("robbie", "robert");
-          put("william", "william");
-          put("will", "william");
-          put("bill", "william");
-          put("billy", "william");
-          put("willy", "william");
-          put("richard", "richard");
-          put("rich", "richard");
-          put("rick", "richard");
-          put("ricky", "richard");
-          put("dick", "richard");
-          put("michael", "michael");
-          put("mike", "michael");
-          put("mikey", "michael");
-          put("mick", "michael");
-          put("joseph", "joseph");
-          put("joe", "joseph");
-          put("joey", "joseph");
-          put("christopher", "christopher");
-          put("chris", "christopher");
-          put("topher", "christopher");
-          put("daniel", "daniel");
-          put("dan", "daniel");
-          put("danny", "daniel");
-          put("matthew", "matthew");
-          put("matt", "matthew");
-          put("matty", "matthew");
-          put("alexander", "alexander");
-          put("alex", "alexander");
-          put("al", "alexander");
-          put("nicholas", "nicholas");
-          put("nick", "nicholas");
-          put("nicky", "nicholas");
-          put("anthony", "anthony");
-          put("tony", "anthony");
-          put("ant", "anthony");
-          put("elizabeth", "elizabeth");
-          put("liz", "elizabeth");
-          put("beth", "elizabeth");
-          put("katherine", "katherine");
-          put("kate", "katherine");
-          put("kathy", "katherine");
-          put("catherine", "katherine");
-          put("jennifer", "jennifer");
-          put("jen", "jennifer");
-          put("jenny", "jennifer");
-          put("patricia", "patricia");
-          put("pat", "patricia");
-          put("barbara", "barbara");
-          put("barb", "barbara");
-          put("margaret", "margaret");
-          put("maggie", "margaret");
-          put("dorothy", "dorothy");
-          put("dot", "dorothy");
-        }
-      };
+  private static final Map<String, String> NICKNAME_MAP =
+          Map.<String, String>ofEntries(
+              Map.entry("john", "john"),
+              Map.entry("jon", "john"),
+              Map.entry("jonny", "john"),
+              Map.entry("johnny", "john"),
+              Map.entry("jack", "john"),
+              Map.entry("jock", "john"),
+              Map.entry("ian", "john"),
+              Map.entry("robert", "robert"),
+              Map.entry("rob", "robert"),
+              Map.entry("bob", "robert"),
+              Map.entry("bobby", "robert"),
+              Map.entry("robbie", "robert"),
+              Map.entry("william", "william"),
+              Map.entry("will", "william"),
+              Map.entry("bill", "william"),
+              Map.entry("billy", "william"),
+              Map.entry("willy", "william"),
+              Map.entry("richard", "richard"),
+              Map.entry("rich", "richard"),
+              Map.entry("rick", "richard"),
+              Map.entry("ricky", "richard"),
+              Map.entry("dick", "richard"),
+              Map.entry("michael", "michael"),
+              Map.entry("mike", "michael"),
+              Map.entry("mikey", "michael"),
+              Map.entry("mick", "michael"),
+              Map.entry("joseph", "joseph"),
+              Map.entry("joe", "joseph"),
+              Map.entry("joey", "joseph"),
+              Map.entry("christopher", "christopher"),
+              Map.entry("chris", "christopher"),
+              Map.entry("topher", "christopher"),
+              Map.entry("daniel", "daniel"),
+              Map.entry("dan", "daniel"),
+              Map.entry("danny", "daniel"),
+              Map.entry("matthew", "matthew"),
+              Map.entry("matt", "matthew"),
+              Map.entry("matty", "matthew"),
+              Map.entry("alexander", "alexander"),
+              Map.entry("alex", "alexander"),
+              Map.entry("al", "alexander"),
+              Map.entry("nicholas", "nicholas"),
+              Map.entry("nick", "nicholas"),
+              Map.entry("nicky", "nicholas"),
+              Map.entry("anthony", "anthony"),
+              Map.entry("tony", "anthony"),
+              Map.entry("ant", "anthony"),
+              Map.entry("elizabeth", "elizabeth"),
+              Map.entry("liz", "elizabeth"),
+              Map.entry("beth", "elizabeth"),
+              Map.entry("katherine", "katherine"),
+              Map.entry("kate", "katherine"),
+              Map.entry("kathy", "katherine"),
+              Map.entry("catherine", "katherine"),
+              Map.entry("jennifer", "jennifer"),
+              Map.entry("jen", "jennifer"),
+              Map.entry("jenny", "jennifer"),
+              Map.entry("patricia", "patricia"),
+              Map.entry("pat", "patricia"),
+              Map.entry("barbara", "barbara"),
+              Map.entry("barb", "barbara"),
+              Map.entry("margaret", "margaret"),
+              Map.entry("maggie", "margaret"),
+              Map.entry("dorothy", "dorothy"),
+              Map.entry("dot", "dorothy"));
 }

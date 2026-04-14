@@ -4,10 +4,6 @@
  */
 package com.mdm.ingestion.service;
 
-import com.mdm.ingestion.entity.IdempotencyKey;
-import com.mdm.ingestion.entity.IdempotencyKey.IdempotencyStatus;
-import com.mdm.ingestion.repository.IdempotencyKeyRepository;
-import com.mdm.ingestion.util.IdempotencyKeyGenerator;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -17,28 +13,37 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Optional;
 import java.util.UUID;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import com.mdm.ingestion.entity.IdempotencyKey;
+import com.mdm.ingestion.entity.IdempotencyKey.IdempotencyStatus;
+import com.mdm.ingestion.repository.IdempotencyKeyRepository;
+import com.mdm.ingestion.util.IdempotencyKeyGenerator;
+import com.mdm.ingestion.util.SensitiveDataMasker;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Manages idempotency key lifecycle using a dual-key strategy.
  *
  * <p>This service implements the idempotency resolution workflow:
+ *
  * <ol>
- *   <li>If client provides X-Idempotency-Key: check it first</li>
- *   <li>If client key is new/unique: allow the request (skip deterministic check)</li>
- *   <li>If NO client key: check deterministic key (payload-based deduplication)</li>
- *   <li>If deterministic key is COMPLETED → return cached response</li>
- *   <li>If neither exists → insert new record</li>
+ *   <li>If client provides X-Idempotency-Key: check it first
+ *   <li>If client key is new/unique: allow the request (skip deterministic check)
+ *   <li>If NO client key: check deterministic key (payload-based deduplication)
+ *   <li>If deterministic key is COMPLETED → return cached response
+ *   <li>If neither exists → insert new record
  * </ol>
  *
- * <p>The deterministic key (SHA-256 of nationalId|sourceSystem) is only checked when
- * the client does NOT provide their own idempotency key. This allows clients to send
- * multiple different requests for the same nationalId+sourceSystem by providing
- * unique idempotency keys for each request.
+ * <p>The deterministic key (SHA-256 of nationalId|sourceSystem) is only checked when the client
+ * does NOT provide their own idempotency key. This allows clients to send multiple different
+ * requests for the same nationalId+sourceSystem by providing unique idempotency keys for each
+ * request.
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -63,30 +68,26 @@ public class IdempotencyService {
    * @return the idempotency result indicating how to proceed
    */
   @Transactional
-  public IdempotencyResult processKey(String clientProvidedKey, String nationalId, String sourceSystem) {
+  public IdempotencyResult processKey(
+      String clientProvidedKey, String nationalId, String sourceSystem) {
     String deterministicKey = resolveDeterministicKey(nationalId, sourceSystem);
     Instant now = Instant.now(clock);
 
     // Step 1: If client provided a key, check it
     if (hasValue(clientProvidedKey)) {
-      Optional<IdempotencyResult> clientResult = lookupByKey(clientProvidedKey, deterministicKey, now);
-      if (clientResult.isPresent()) {
-        return clientResult.get();
-      }
+      Optional<IdempotencyResult> clientResult =
+          lookupByKey(clientProvidedKey, deterministicKey, now);
+        return clientResult.orElseGet(() -> insertNewKey(clientProvidedKey, deterministicKey, now));
       // Client key is new and unique - allow the request WITHOUT checking deterministic key
       // This enables sending different payloads for same nationalId+sourceSystem
-      return insertNewKey(clientProvidedKey, deterministicKey, now);
     }
 
     // Step 2: NO client key - check deterministic key for payload deduplication
     Optional<IdempotencyResult> deterministicResult =
         lookupByKey(deterministicKey, deterministicKey, now);
-    if (deterministicResult.isPresent()) {
-      return deterministicResult.get();
-    }
+      return deterministicResult.orElseGet(() -> insertNewKey(null, deterministicKey, now));
 
     // Step 3: No existing key found — insert new record with deterministic key
-    return insertNewKey(null, deterministicKey, now);
   }
 
   /**
@@ -98,28 +99,41 @@ public class IdempotencyService {
   @Transactional
   public void completeKey(String keyHash, UUID eventId) {
     repository.completeByKeyHash(keyHash, IdempotencyStatus.COMPLETED);
-    log.info("Idempotency key completed: keyHash={}, eventId={}", maskKey(keyHash), eventId);
+    log.info(
+        "Idempotency key completed: keyHash={}, eventId={}",
+        SensitiveDataMasker.maskHash(keyHash),
+        eventId);
   }
 
   /**
-   * Marks an idempotency key as failed (preventing reprocessing).
+   * Marks an idempotency key as failed (allowing retry after backoff period).
    *
    * @param keyHash the SHA-256 hash of the deterministic key
    * @param eventId the event ID that failed
    */
   @Transactional
   public void failKey(String keyHash, UUID eventId) {
-    repository.completeByKeyHash(keyHash, IdempotencyStatus.COMPLETED);
-    log.warn("Idempotency key marked failed: keyHash={}, eventId={}", maskKey(keyHash), eventId);
+    int updated = repository.completeByKeyHash(keyHash, IdempotencyStatus.FAILED);
+    if (updated > 0) {
+      log.warn(
+          "Idempotency key marked failed: keyHash={}, eventId={}",
+          SensitiveDataMasker.maskHash(keyHash),
+          eventId);
+    } else {
+      log.debug(
+          "Idempotency key was not in PROCESSING state, skip fail: keyHash={}",
+          SensitiveDataMasker.maskHash(keyHash));
+    }
   }
 
   // ─── Private helpers ───────────────────────────────────────────────────────
 
   private Optional<IdempotencyResult> lookupByKey(
       String lookupKey, String deterministicKey, Instant now) {
-    Optional<IdempotencyKey> found = repository.findByKeyHash(lookupKey);
+    // Use pessimistic locking to prevent race conditions
+    Optional<IdempotencyKey> found = repository.findByKeyHashForUpdate(lookupKey);
     if (found.isEmpty()) {
-      found = repository.findByClientIdempotencyKey(lookupKey);
+      found = repository.findByClientIdempotencyKeyForUpdate(lookupKey);
     }
 
     if (found.isEmpty()) {
@@ -131,8 +145,8 @@ public class IdempotencyService {
     if (key.isExpiredAt(now)) {
       log.info(
           "Idempotency key expired: lookupKey={}, deterministicKey={}, expiresAt={}",
-          maskKey(lookupKey),
-          maskKey(deterministicKey),
+          SensitiveDataMasker.maskHash(lookupKey),
+          SensitiveDataMasker.maskHash(deterministicKey),
           key.getExpiresAt());
       return Optional.of(IdempotencyResult.expired(deterministicKey));
     }
@@ -140,16 +154,16 @@ public class IdempotencyService {
     if (key.getStatus() == IdempotencyStatus.COMPLETED) {
       log.info(
           "Idempotency key hit: lookupKey={}, deterministicKey={}, eventId={}",
-          maskKey(lookupKey),
-          maskKey(deterministicKey),
+          SensitiveDataMasker.maskHash(lookupKey),
+          SensitiveDataMasker.maskHash(deterministicKey),
           key.getEventId());
       return Optional.of(IdempotencyResult.hit(deterministicKey, key.getEventId()));
     }
 
     log.info(
         "Idempotency key still processing: lookupKey={}, deterministicKey={}",
-        maskKey(lookupKey),
-        maskKey(deterministicKey));
+        SensitiveDataMasker.maskHash(lookupKey),
+        SensitiveDataMasker.maskHash(deterministicKey));
     return Optional.of(IdempotencyResult.processing(deterministicKey));
   }
 
@@ -161,9 +175,8 @@ public class IdempotencyService {
 
     // When client provides a key, use client key hash as primary key to allow
     // multiple different requests for same nationalId+sourceSystem
-    String primaryHash = hasValue(clientProvidedKey)
-        ? hashClientKey(clientProvidedKey)
-        : deterministicKey;
+    String primaryHash =
+        hasValue(clientProvidedKey) ? hashClientKey(clientProvidedKey) : deterministicKey;
 
     int inserted =
         repository.insertIfNotExists(
@@ -177,9 +190,9 @@ public class IdempotencyService {
     if (inserted > 0) {
       log.info(
           "Idempotency key miss (new): primaryHash={}, deterministicKey={}, clientKey={}, eventId={}, ttl={}",
-          maskKey(primaryHash),
-          maskKey(deterministicKey),
-          maskKey(clientProvidedKey),
+          SensitiveDataMasker.maskHash(primaryHash),
+          SensitiveDataMasker.maskHash(deterministicKey),
+          SensitiveDataMasker.maskHash(clientProvidedKey),
           eventId,
           ttl.toHours() + "h");
       return IdempotencyResult.miss(primaryHash, eventId);
@@ -197,14 +210,14 @@ public class IdempotencyService {
     if (concurrentKey.getStatus() == IdempotencyStatus.COMPLETED) {
       log.info(
           "Idempotency key hit (concurrent): keyHash={}, eventId={}",
-          maskKey(primaryHash),
+          SensitiveDataMasker.maskHash(primaryHash),
           concurrentKey.getEventId());
       return IdempotencyResult.hit(primaryHash, concurrentKey.getEventId());
     }
 
     log.info(
         "Idempotency key still processing (concurrent): keyHash={}",
-        maskKey(primaryHash));
+        SensitiveDataMasker.maskHash(primaryHash));
     return IdempotencyResult.processing(primaryHash);
   }
 
@@ -232,13 +245,6 @@ public class IdempotencyService {
 
   private static boolean hasValue(String value) {
     return value != null && !value.isBlank();
-  }
-
-  private static String maskKey(String key) {
-    if (key == null || key.length() <= 8) {
-      return "***";
-    }
-    return key.substring(0, 4) + "..." + key.substring(key.length() - 4);
   }
 
   // ─── Sealed result types ───────────────────────────────────────────────────

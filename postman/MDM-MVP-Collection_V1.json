@@ -3052,6 +3052,154 @@
         }
       ],
       "description": "Step-by-step demo. Run these requests in order to showcase the MDM system."
+    },
+    {
+      "name": "10 - Transactional Outbox",
+      "item": [
+        {
+          "name": "Outbox Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/outbox/stats",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "outbox",
+                "stats"
+              ]
+            },
+            "description": "Get outbox statistics including pending event count. Requires ADMIN role."
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{admin_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url_ingestion}}/api/outbox/stats",
+                  "host": [
+                    "{{base_url_ingestion}}"
+                  ],
+                  "path": [
+                    "api",
+                    "outbox",
+                    "stats"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "JSON",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"pendingEvents\": 5,\n  \"description\": \"Pending events are outbox records waiting to be published to Kafka\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Retry Outbox Event",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/outbox/retry/{{outbox_event_id}}",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "outbox",
+                "retry",
+                "{{outbox_event_id}}"
+              ]
+            },
+            "description": "Manually retry a specific outbox event by ID. Useful when an event failed due to a transient error and you want to republish it. Requires ADMIN role."
+          },
+          "response": []
+        },
+        {
+          "name": "Force Requeue Outbox Event",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/outbox/force-requeue/{{outbox_event_id}}",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "outbox",
+                "force-requeue",
+                "{{outbox_event_id}}"
+              ]
+            },
+            "description": "Force requeue a processed outbox event for re-processing. This is an admin operation to recover from edge cases where an event was processed incorrectly. Requires ADMIN role."
+          },
+          "response": []
+        },
+        {
+          "name": "Check Outbox Metrics (Prometheus)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_ingestion}}/actuator/prometheus",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "actuator",
+                "prometheus"
+              ]
+            },
+            "description": "Check Prometheus metrics for outbox: outbox_events_pending, outbox_events_published_total, outbox_events_failed_total, outbox_events_dlq_total."
+          },
+          "response": []
+        }
+      ],
+      "description": "Transactional Outbox Pattern management. Monitor pending outbox events, manually retry failed events, and force requeue processed events. All endpoints require ADMIN role."
     }
   ],
   "auth": {
@@ -3144,6 +3292,11 @@
     {
       "key": "test_customer_id",
       "value": ""
+    },
+    {
+      "key": "outbox_event_id",
+      "value": "",
+      "description": "Outbox event UUID for manual retry/requeue operations"
     }
   ]
 }

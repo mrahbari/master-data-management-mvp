@@ -26,7 +26,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mdm.mastering.dto.CustomerRawEvent;
 import com.mdm.mastering.dto.dlq.DlqEvent;
-import com.mdm.mastering.entity.CustomerRawEntity;
 import com.mdm.mastering.exception.ClassifiedException;
 import com.mdm.mastering.exception.ErrorType;
 import com.mdm.mastering.metrics.RetryAndDlqMetrics;
@@ -34,6 +33,7 @@ import com.mdm.mastering.repository.CustomerRawRepository;
 import com.mdm.mastering.service.DlqMessageFormatter;
 import com.mdm.mastering.service.DlqProducer;
 import com.mdm.mastering.service.GoldenRecordService;
+import com.mdm.mastering.util.SensitiveDataMasker;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -59,6 +59,9 @@ public class CustomerRawEventListener {
   private static final Logger dlqLog = LoggerFactory.getLogger("com.mdm.mastering.dlq");
   private static final Marker RETRY_MARKER = MarkerFactory.getMarker("RETRY");
   private static final Marker DLQ_MARKER = MarkerFactory.getMarker("DLQ");
+
+  // ThreadLocal to carry Kafka offset into the recovery context
+  private static final ThreadLocal<Long> CURRENT_OFFSET = new ThreadLocal<>();
 
   private final CustomerRawRepository rawRepository;
   private final GoldenRecordService goldenRecordService;
@@ -110,18 +113,11 @@ public class CustomerRawEventListener {
     log.info(
         "Received raw customer event: eventId={}, nationalId={}, source={}",
         event.getEventId(),
-        maskNationalId(event.getNationalId()),
+        SensitiveDataMasker.maskNationalId(event.getNationalId()),
         event.getSourceSystem());
 
     try {
-      // Idempotency: skip if already processed
-      if (rawRepository.existsByEventId(event.getEventId())) {
-        log.warn("Event already processed (idempotent skip): eventId={}", event.getEventId());
-        ack.acknowledge();
-        return;
-      }
-
-      // Process with retry
+      // Process with retry (includes atomic raw event storage)
       processWithRetry(event, record.offset());
 
       // Acknowledge after successful processing
@@ -160,26 +156,36 @@ public class CustomerRawEventListener {
   private void processWithRetry(CustomerRawEvent event, long offset) {
     retryAndDlqMetrics.recordEventProcessed();
 
-    // Store raw event (audit trail)
-    CustomerRawEntity rawEntity =
-        CustomerRawEntity.builder()
-            .id(UUID.randomUUID())
-            .eventId(event.getEventId())
-            .nationalId(event.getNationalId())
-            .name(event.getName())
-            .email(event.getEmail())
-            .phone(event.getPhone())
-            .sourceSystem(event.getSourceSystem())
-            .rawPayload(toJson(event))
-            .createdAt(Instant.now())
-            .build();
+    CURRENT_OFFSET.set(offset);
+    try {
+      // Store raw event (audit trail) - atomic insert to prevent duplicate processing
+      int inserted =
+          rawRepository.saveIfNotExists(
+              UUID.randomUUID(),
+              event.getEventId(),
+              event.getNationalId(),
+              event.getName(),
+              event.getEmail(),
+              event.getPhone(),
+              event.getSourceSystem(),
+              toJson(event),
+              Instant.now());
 
-    rawRepository.save(rawEntity);
+      if (inserted == 0) {
+        // Event was already processed - skip idempotently
+        log.warn(
+            "Event already processed (atomic idempotent skip): eventId={}", event.getEventId());
+        retryAndDlqMetrics.recordEventProcessed();
+        return;
+      }
 
-    // Process for golden record creation/update
-    goldenRecordService.processCustomerEvent(event);
+      // Process for golden record creation/update
+      goldenRecordService.processCustomerEvent(event);
 
-    logRetry(event, 0, null, true);
+      logRetry(event, 0, null, true);
+    } finally {
+      CURRENT_OFFSET.remove();
+    }
   }
 
   /**
@@ -188,7 +194,7 @@ public class CustomerRawEventListener {
    */
   @Recover
   public void recover(Exception ex, CustomerRawEvent event) {
-    long offset = 0L; // Offset not available in recovery context; use 0
+    long offset = CURRENT_OFFSET.get() != null ? CURRENT_OFFSET.get() : 0L;
     recoverWithOffset(ex, event, offset);
   }
 
@@ -236,12 +242,5 @@ public class CustomerRawEventListener {
       log.warn("Failed to serialize event to JSON: eventId={}", event.getEventId(), e);
       return "{}";
     }
-  }
-
-  private static String maskNationalId(String nationalId) {
-    if (nationalId == null || nationalId.length() <= 4) {
-      return "***";
-    }
-    return "***" + nationalId.substring(nationalId.length() - 4);
   }
 }

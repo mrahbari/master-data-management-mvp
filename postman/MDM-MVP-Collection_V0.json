@@ -1,11 +1,11 @@
 {
   "info": {
-    "_postman_id": "62035653-89e6-4921-b39a-76a68bc58dc1",
+    "_postman_id": "ca6f7583-332c-4c5d-93ed-2e6a7b627093",
     "name": "MDM MVP - Customer Management",
     "description": "Complete Postman collection for testing the MDM (Master Data Management) MVP system with CQRS architecture.\n\n## Architecture\n- **Customer Ingestion Service** (port 8080) — Command side (writes via Kafka)\n- **Customer Mastering Service** (port 8081) — Query side (reads from PostgreSQL)\n- **OAuth2 Server** (port 9999) — JWT token issuance (RS256)\n- **Kafka** (port 9092) — Event streaming (KRaft mode)\n- **PostgreSQL** (port 5432) — Golden record storage\n\n## Key Concepts\n- **nationalId** is the canonical unique identifier for customer deduplication\n- Deduplication is by **nationalId exact match** (not email)\n- Kafka partition key = nationalId (guarantees per-customer ordering)\n- Dual-key idempotency: client-provided + SHA-256(nationalId|sourceSystem)\n- DLQ (Dead Letter Queue) for poison messages after retry exhaustion\n\n## Collection Structure\n1. **OAuth2 Authentication** — Get JWT tokens\n2. **Health & Setup** — Service health checks\n3. **Command Side (Write)** — Customer ingestion with nationalId\n4. **Query Side (Read)** — Customer queries by nationalId\n5. **Idempotency Testing** — Duplicate detection\n6. **Validation & Errors** — Error handling\n7. **DLQ & Retry** — Dead Letter Queue testing\n8. **Observability** — Metrics & SLOs\n\n## Environment Variables\n- `base_url_ingestion`: http://localhost:8080\n- `base_url_mastering`: http://localhost:8081\n- `oauth_url`: http://localhost:9999\n- `oauth_token`: JWT token (auto-set)\n- `test_national_id`: Test national ID (auto-set)\n- `test_customer_id`: Golden record ID (auto-set)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "2896116",
-    "_collection_link": "https://go.postman.co/collection/2896116-62035653-89e6-4921-b39a-76a68bc58dc1?source=collection_link"
+    "_collection_link": "https://go.postman.co/collection/2896116-ca6f7583-332c-4c5d-93ed-2e6a7b627093?source=collection_link"
   },
   "item": [
     {
@@ -791,6 +791,367 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "03-Conflict-Resolution-Scenarios",
+      "item": [
+        {
+          "name": "Scenario-1-LATEST-Update",
+          "item": [
+            {
+              "name": "Step 1 - Send CRM Event (Older)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "// Store timestamp for reference",
+                      "pm.environment.set('crm_timestamp', '2024-01-15T10:30:00Z');"
+                    ],
+                    "type": "text/javascript",
+                    "packages": {},
+                    "requests": {}
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{oauth_token}}",
+                    "description": "OAuth2 access token with CUSTOMER_WRITE scope"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nationalId\": \"123456789012\",\n  \"name\": \"John Doe\",\n  \"email\": \"john@old.com\",\n  \"phone\": \"+1-555-1111\",\n  \"sourceSystem\": \"CRM\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url_ingestion}}/api/customers",
+                  "host": [
+                    "{{base_url_ingestion}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers"
+                  ]
+                },
+                "description": "Send customer event from CRM with older timestamp. Email: john@old.com @ 10:30:00"
+              },
+              "response": []
+            },
+            {
+              "name": "Step 2 - Send BANK Event (Newer)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "// Store timestamp for reference",
+                      "pm.environment.set('bank_timestamp', '2024-01-15T10:30:05Z');"
+                    ],
+                    "type": "text/javascript",
+                    "packages": {},
+                    "requests": {}
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{oauth_token}}",
+                    "description": "OAuth2 access token with CUSTOMER_WRITE scope"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nationalId\": \"123456789012\",\n  \"name\": \"John Doe\",\n  \"email\": \"john@new.com\",\n  \"phone\": \"+1-555-2222\",\n  \"sourceSystem\": \"BANK\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url_ingestion}}/api/customers",
+                  "host": [
+                    "{{base_url_ingestion}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers"
+                  ]
+                },
+                "description": "Send conflicting event from BANK with newer timestamp. Email: john@new.com @ 10:30:05. Expected: BANK email wins (LATEST_UPDATE strategy)"
+              },
+              "response": []
+            },
+            {
+              "name": "Step 3 - Verify Resolved Record",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url_mastering}}/api/customers/by-national-id?nationalId=123456789012",
+                  "host": [
+                    "{{base_url_mastering}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers",
+                    "by-national-id"
+                  ],
+                  "query": [
+                    {
+                      "key": "nationalId",
+                      "value": "123456789012"
+                    }
+                  ]
+                },
+                "description": "Verify that email=john@new.com (BANK's value won due to later timestamp)"
+              },
+              "response": []
+            }
+          ],
+          "description": "Test LATEST_UPDATE strategy: Most recent timestamp wins. CRM sends email@old.com @ 10:30:00, BANK sends email@new.com @ 10:30:05 → Result: email@new.com"
+        },
+        {
+          "name": "Scenario-2-TRUSTED-Source",
+          "item": [
+            {
+              "name": "Step 1 - Send CRM Event (Trusted for Name)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{oauth_token}}",
+                    "description": "OAuth2 access token with CUSTOMER_WRITE scope"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nationalId\": \"987654321012\",\n  \"name\": \"John Michael Doe\",\n  \"email\": \"john@crm.com\",\n  \"phone\": \"+1-555-3333\",\n  \"sourceSystem\": \"CRM\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url_ingestion}}/api/customers",
+                  "host": [
+                    "{{base_url_ingestion}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers"
+                  ]
+                },
+                "description": "Send customer event from CRM (trusted source for name field)"
+              },
+              "response": []
+            },
+            {
+              "name": "Step 2 - Send BANK Event (Newer but Not Trusted for Name)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{oauth_token}}",
+                    "description": "OAuth2 access token with CUSTOMER_WRITE scope"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nationalId\": \"987654321012\",\n  \"name\": \"J. Doe\",\n  \"email\": \"john@bank.com\",\n  \"phone\": \"+1-555-4444\",\n  \"sourceSystem\": \"BANK\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url_ingestion}}/api/customers",
+                  "host": [
+                    "{{base_url_ingestion}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers"
+                  ]
+                },
+                "description": "Send conflicting event from BANK. Name: J. Doe (newer but BANK not trusted for name). Expected: Name stays 'John Michael Doe' (CRM is trusted)"
+              },
+              "response": []
+            },
+            {
+              "name": "Step 3 - Verify Resolved Record",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url_mastering}}/api/customers/by-national-id?nationalId=987654321012",
+                  "host": [
+                    "{{base_url_mastering}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers",
+                    "by-national-id"
+                  ],
+                  "query": [
+                    {
+                      "key": "nationalId",
+                      "value": "987654321012"
+                    }
+                  ]
+                },
+                "description": "Verify that name='John Michael Doe' (CRM trusted), but email='john@bank.com' (LATEST_UPDATE for email)"
+              },
+              "response": []
+            }
+          ],
+          "description": "Test TRUSTED_SOURCE strategy: CRM is trusted for name field. CRM says 'John Michael Doe', BANK says 'J. Doe' → Result: 'John Michael Doe' (CRM trusted)"
+        },
+        {
+          "name": "Scenario-3-MERGE-Phones",
+          "item": [
+            {
+              "name": "Step 1 - Send First Phone",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{oauth_token}}",
+                    "description": "OAuth2 access token with CUSTOMER_WRITE scope"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nationalId\": \"555555555512\",\n  \"name\": \"Jane Smith\",\n  \"email\": \"jane@example.com\",\n  \"phone\": \"+1-555-1111\",\n  \"sourceSystem\": \"CRM\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url_ingestion}}/api/customers",
+                  "host": [
+                    "{{base_url_ingestion}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers"
+                  ]
+                },
+                "description": "Send first phone number from CRM"
+              },
+              "response": []
+            },
+            {
+              "name": "Step 2 - Send Second Phone (Same Customer)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{oauth_token}}",
+                    "description": "OAuth2 access token with CUSTOMER_WRITE scope"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nationalId\": \"555555555512\",\n  \"name\": \"Jane Smith\",\n  \"email\": \"jane@example.com\",\n  \"phone\": \"+1-555-2222\",\n  \"sourceSystem\": \"BANK\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url_ingestion}}/api/customers",
+                  "host": [
+                    "{{base_url_ingestion}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers"
+                  ]
+                },
+                "description": "Send second phone number from BANK. Expected: Both phones merged [+1-555-1111, +1-555-2222]"
+              },
+              "response": []
+            },
+            {
+              "name": "Step 3 - Send Third Phone",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{oauth_token}}",
+                    "description": "OAuth2 access token with CUSTOMER_WRITE scope"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nationalId\": \"555555555512\",\n  \"name\": \"Jane Smith\",\n  \"email\": \"jane@example.com\",\n  \"phone\": \"+1-555-3333\",\n  \"sourceSystem\": \"GOVERNMENT\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url_ingestion}}/api/customers",
+                  "host": [
+                    "{{base_url_ingestion}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers"
+                  ]
+                },
+                "description": "Send third phone number. Expected: All three phones merged [+1-555-1111, +1-555-2222, +1-555-3333]"
+              },
+              "response": []
+            },
+            {
+              "name": "Step 4 - Verify Merged Phones",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url_mastering}}/api/customers/by-national-id?nationalId=555555555512",
+                  "host": [
+                    "{{base_url_mastering}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers",
+                    "by-national-id"
+                  ],
+                  "query": [
+                    {
+                      "key": "nationalId",
+                      "value": "555555555512"
+                    }
+                  ]
+                },
+                "description": "Verify phone field contains JSON array: [\"+1-555-1111\",\"+1-555-2222\",\"+1-555-3333\"]"
+              },
+              "response": []
+            }
+          ],
+          "description": "Test MERGE strategy for phones: Multiple sources provide different phone numbers → Result: All phones merged into array with UNION strategy (max 5)"
+        }
+      ],
+      "description": "Conflict resolution test scenarios to verify different strategies"
     },
     {
       "name": "03 - Query Side (Read)",
@@ -1839,236 +2200,311 @@
       "name": "06 - DLQ & Retry",
       "item": [
         {
-          "name": "DLQ Topic - Kafka Topics List",
+          "name": "DLQ Stats - Get Configuration",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token with CUSTOMER_READ scope"
+              }
+            ],
             "url": {
-              "raw": "docker-compose/exec/kafka/kafka-topics/--bootstrap-server/localhost:9092/--list",
+              "raw": "{{base_url_mastering}}/api/dlq/stats",
               "host": [
-                "docker-compose"
+                "{{base_url_mastering}}"
               ],
               "path": [
-                "exec",
-                "kafka",
-                "kafka-topics",
-                "--bootstrap-server",
-                "localhost:9092",
-                "--list"
+                "api",
+                "dlq",
+                "stats"
               ]
             },
-            "description": "List all Kafka topics. Expected topics:\n- customer.raw\n- customer.mastered\n- customer.dlq\n\nRun this from the terminal, not Postman. Use: docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list"
+            "description": "Get DLQ topic configuration and retry settings.\n\nRequires OAuth2 token with CUSTOMER_READ or ADMIN role.\n\nReturns:\n- DLQ and raw topic names\n- Retry configuration (max attempts, intervals, multiplier)\n- Error type classifications\n\nThis replaces the docker-compose exec kafka kafka-topics --list command."
           },
           "response": [
             {
-              "name": "Topics List",
+              "name": "DLQ Stats Response",
               "originalRequest": {
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "docker-compose/exec/kafka/kafka-topics/--bootstrap-server/localhost:9092/--list",
+                  "raw": "{{base_url_mastering}}/api/dlq/stats",
                   "host": [
-                    "docker-compose"
+                    "{{base_url_mastering}}"
                   ],
                   "path": [
-                    "exec",
-                    "kafka",
-                    "kafka-topics",
-                    "--bootstrap-server",
-                    "localhost:9092",
-                    "--list"
+                    "api",
+                    "dlq",
+                    "stats"
                   ]
-                },
-                "description": "List all Kafka topics. Expected topics:\n- customer.raw\n- customer.mastered\n- customer.dlq\n\nRun this from the terminal, not Postman. Use: docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list"
+                }
               },
               "status": "OK",
               "code": 200,
-              "_postman_previewlanguage": "Text",
+              "_postman_previewlanguage": "JSON",
               "header": [],
               "cookie": [],
-              "body": "customer.raw\ncustomer.mastered\ncustomer.dlq"
+              "body": "{\n  \"dlqTopic\": \"customer.dlq\",\n  \"rawTopic\": \"customer.raw\",\n  \"maxRetries\": 3,\n  \"retryInitialInterval\": \"1000ms\",\n  \"retryMaxInterval\": \"10000ms\",\n  \"retryMultiplier\": 2.0,\n  \"errorTypes\": {\n    \"TRANSIENT\": \"Retryable errors (DB deadlock, timeout) - retried 3 times\",\n    \"PERMANENT\": \"Non-retryable errors (constraint violation) - directly to DLQ\",\n    \"BUSINESS\": \"Business rule failures - logged and skipped\"\n  }\n}"
             }
           ]
         },
         {
-          "name": "DLQ - Describe DLQ Topic",
+          "name": "DLQ Structure - Message Format Reference",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token with CUSTOMER_READ scope"
+              }
+            ],
             "url": {
-              "raw": "docker-compose/exec/kafka/kafka-topics/--bootstrap-server/localhost:9092/--describe/--topic/customer.dlq",
+              "raw": "{{base_url_mastering}}/api/dlq/structure",
               "host": [
-                "docker-compose"
+                "{{base_url_mastering}}"
               ],
               "path": [
-                "exec",
-                "kafka",
-                "kafka-topics",
-                "--bootstrap-server",
-                "localhost:9092",
-                "--describe",
-                "--topic",
-                "customer.dlq"
+                "api",
+                "dlq",
+                "structure"
               ]
             },
-            "description": "Describe the DLQ topic configuration (partitions, replication factor, retention).\n\nRun from terminal: docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --describe --topic customer.dlq"
+            "description": "Get DLQ message structure reference with examples.\n\nRequires OAuth2 token with CUSTOMER_READ or ADMIN role.\n\nReturns:\n- Complete DLQ message JSON example\n- Field descriptions\n- Error type classifications with examples and behavior\n\nThis replaces the need to manually inspect DLQ messages to understand the format."
           },
           "response": []
         },
         {
-          "name": "DLQ - Consume DLQ Messages",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "docker-compose/exec/kafka/kafka-console-consumer/--bootstrap-server/localhost:9092/--topic/customer.dlq/--from-beginning/--max-messages/10/--timeout-ms/10000",
-              "host": [
-                "docker-compose"
-              ],
-              "path": [
-                "exec",
-                "kafka",
-                "kafka-console-consumer",
-                "--bootstrap-server",
-                "localhost:9092",
-                "--topic",
-                "customer.dlq",
-                "--from-beginning",
-                "--max-messages",
-                "10",
-                "--timeout-ms",
-                "10000"
-              ]
-            },
-            "description": "Consume DLQ messages to inspect failed events.\n\nRun from terminal:\ndocker-compose exec kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic customer.dlq --from-beginning --max-messages 10 --timeout-ms 10000\n\nDLQ messages contain:\n- originalEvent: the failed CustomerRawEvent\n- errorDetails: exception, message, stackTrace\n- processingHistory: retry attempts\n- schemaVersion: v1"
-          },
-          "response": [
+          "name": "DLQ Reprocess - Send DLQ Message for Reprocessing",
+          "event": [
             {
-              "name": "DLQ Message Example",
-              "originalRequest": {
-                "method": "GET",
-                "header": [],
-                "url": {
-                  "raw": "docker-compose/exec/kafka/kafka-console-consumer/--bootstrap-server/localhost:9092/--topic/customer.dlq/--from-beginning/--max-messages/10/--timeout-ms/10000",
-                  "host": [
-                    "docker-compose"
-                  ],
-                  "path": [
-                    "exec",
-                    "kafka",
-                    "kafka-console-consumer",
-                    "--bootstrap-server",
-                    "localhost:9092",
-                    "--topic",
-                    "customer.dlq",
-                    "--from-beginning",
-                    "--max-messages",
-                    "10",
-                    "--timeout-ms",
-                    "10000"
-                  ]
-                },
-                "description": "Consume DLQ messages to inspect failed events.\n\nRun from terminal:\ndocker-compose exec kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic customer.dlq --from-beginning --max-messages 10 --timeout-ms 10000\n\nDLQ messages contain:\n- originalEvent: the failed CustomerRawEvent\n- errorDetails: exception, message, stackTrace\n- processingHistory: retry attempts\n- schemaVersion: v1"
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "Text",
-              "header": [],
-              "cookie": [],
-              "body": "{\n  \"originalEvent\": {\n    \"eventId\": \"abc123\",\n    \"nationalId\": \"123456789012\",\n    \"name\": \"John Doe\",\n    \"email\": \"john@example.com\",\n    \"sourceSystem\": \"WEB\",\n    \"timestamp\": \"2026-04-03T20:30:00Z\"\n  },\n  \"errorDetails\": {\n    \"exception\": \"DataIntegrityViolationException\",\n    \"message\": \"could not execute statement...\",\n    \"stackTrace\": \"org.springframework.dao.DataIntegrityViolationException...\"\n  },\n  \"processingHistory\": [\n    {\n      \"attempt\": 3,\n      \"timestamp\": \"2026-04-03T20:30:05Z\",\n      \"error\": \"DeadlockLoserDataAccessException: Deadlock detected\"\n    }\n  ],\n  \"schemaVersion\": \"v1\"\n}"
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 200\", function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "var jsonData = pm.response.json();",
+                  "pm.test(\"Reprocessing successful\", function() {",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "});",
+                  "",
+                  "if (jsonData.newEventId) {",
+                  "    pm.environment.set(\"reprocessed_event_id\", jsonData.newEventId);",
+                  "    console.log(\"Reprocessed with new event ID: \" + jsonData.newEventId);",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
             }
-          ]
-        },
-        {
-          "name": "Retry - Check Mastering Service Logs",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "docker-compose/logs/--tail=100/customer-mastering-service",
-              "host": [
-                "docker-compose"
-              ],
-              "path": [
-                "logs",
-                "--tail=100",
-                "customer-mastering-service"
-              ]
-            },
-            "description": "Check mastering service logs for retry attempts and DLQ messages.\n\nRun from terminal:\ndocker-compose logs --tail=100 customer-mastering-service\n\nLook for:\n- 'Retry attempt for event' — retry in progress\n- 'Message sent to DLQ' — all retries exhausted\n- 'Successfully processed event' — normal processing"
-          },
-          "response": []
-        },
-        {
-          "name": "Retry - View DLQ-Specific Logs",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "docker-compose/logs/--tail=50/customer-mastering-service",
-              "host": [
-                "docker-compose"
-              ],
-              "path": [
-                "logs",
-                "--tail=50",
-                "customer-mastering-service"
-              ]
-            },
-            "description": "Filter logs for DLQ-related entries.\n\nRun from terminal:\ndocker-compose logs --tail=50 customer-mastering-service | grep -i DLQ"
-          },
-          "response": []
-        },
-        {
-          "name": "DLQ - Reprocess DLQ Message (Manual)",
+          ],
           "request": {
             "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token with CUSTOMER_WRITE or ADMIN role"
               }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"originalEvent\": {\n    \"eventId\": \"abc123\",\n    \"nationalId\": \"123456789012\",\n    \"name\": \"John Doe\",\n    \"email\": \"john@example.com\",\n    \"sourceSystem\": \"WEB\"\n  },\n  \"errorDetails\": {\n    \"exception\": \"DataIntegrityViolationException\",\n    \"message\": \"could not execute statement\"\n  },\n  \"processingHistory\": [\n    {\n      \"attempt\": 3,\n      \"timestamp\": \"2026-04-03T20:30:05Z\",\n      \"error\": \"Deadlock detected\"\n    }\n  ],\n  \"schemaVersion\": \"v1\"\n}"
+              "raw": "{\n  \"originalEvent\": {\n    \"eventId\": \"abc123\",\n    \"nationalId\": \"123456789012\",\n    \"name\": \"John Doe\",\n    \"email\": \"john@example.com\",\n    \"phone\": \"+1-555-123-4567\",\n    \"sourceSystem\": \"WEB\",\n    \"timestamp\": \"2026-04-03T20:30:00Z\"\n  },\n  \"errorDetails\": {\n    \"exception\": \"DataIntegrityViolationException\",\n    \"message\": \"could not execute statement\"\n  },\n  \"processingHistory\": [\n    {\n      \"attempt\": 3,\n      \"timestamp\": \"2026-04-03T20:30:05Z\",\n      \"error\": \"Deadlock detected\"\n    }\n  ],\n  \"schemaVersion\": \"v1\"\n}"
             },
             "url": {
-              "raw": "{{base_url_mastering}}/api/customers",
+              "raw": "{{base_url_mastering}}/api/dlq/reprocess",
               "host": [
                 "{{base_url_mastering}}"
               ],
               "path": [
                 "api",
-                "customers"
+                "dlq",
+                "reprocess"
               ]
             },
-            "description": "NOTE: This is a placeholder. DLQ reprocessing typically requires a separate consumer or manual Kafka producer.\n\nTo manually reprocess a DLQ message:\n1. Extract the originalEvent from the DLQ message\n2. Publish it back to customer.raw topic:\n   docker-compose exec kafka kafka-console-producer --bootstrap-server localhost:9092 --topic customer.raw\n3. Paste the originalEvent JSON\n\nOr build a DLQ reprocessor service that:\n- Reads from customer.dlq\n- Validates/fixes the data\n- Republishes to customer.raw"
+            "description": "Reprocess a DLQ message by extracting the original event and republishing it to the customer.raw topic.\n\nRequires OAuth2 token with CUSTOMER_WRITE or ADMIN role.\n\nThe service will:\n1. Extract the originalEvent from the DLQ wrapper\n2. Generate a new eventId for tracking\n3. Validate required fields (nationalId, sourceSystem)\n4. Publish to customer.raw topic for reprocessing\n5. Return the new eventId for tracking\n\nResponse includes:\n- success: boolean\n- newEventId: UUID for the reprocessed event\n- nationalId: customer identifier\n- sourceSystem: original source\n- republishedTo: Kafka topic name"
+          },
+          "response": [
+            {
+              "name": "Reprocess Success Response",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"originalEvent\": {\n    \"eventId\": \"abc123\",\n    \"nationalId\": \"123456789012\",\n    \"name\": \"John Doe\",\n    \"email\": \"john@example.com\",\n    \"phone\": \"+1-555-123-4567\",\n    \"sourceSystem\": \"WEB\"\n  },\n  \"errorDetails\": {\n    \"exception\": \"DataIntegrityViolationException\",\n    \"message\": \"could not execute statement\"\n  },\n  \"processingHistory\": [\n    {\n      \"attempt\": 3,\n      \"timestamp\": \"2026-04-03T20:30:05Z\",\n      \"error\": \"Deadlock detected\"\n    }\n  ],\n  \"schemaVersion\": \"v1\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url_mastering}}/api/dlq/reprocess",
+                  "host": [
+                    "{{base_url_mastering}}"
+                  ],
+                  "path": [
+                    "api",
+                    "dlq",
+                    "reprocess"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "JSON",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"DLQ message reprocessed successfully\",\n  \"newEventId\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"nationalId\": \"123456789012\",\n  \"sourceSystem\": \"WEB\",\n  \"republishedTo\": \"customer.raw\"\n}"
+            },
+            {
+              "name": "Reprocess Error Response",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"originalEvent\": null\n}"
+                },
+                "url": {
+                  "raw": "{{base_url_mastering}}/api/dlq/reprocess",
+                  "host": [
+                    "{{base_url_mastering}}"
+                  ],
+                  "path": [
+                    "api",
+                    "dlq",
+                    "reprocess"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "JSON",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": \"No original event found in DLQ message\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "DLQ Manual Reprocess - Get Instructions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{oauth_token}}",
+                "description": "OAuth2 access token with CUSTOMER_READ scope"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url_mastering}}/api/dlq/manual-reprocess",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "api",
+                "dlq",
+                "manual-reprocess"
+              ]
+            },
+            "description": "Get step-by-step instructions for manually reprocessing DLQ messages using Kafka CLI tools.\n\nRequires OAuth2 token with CUSTOMER_READ or ADMIN role.\n\nInstructions include:\n1. Consuming DLQ messages\n2. Extracting original event\n3. Publishing back to raw topic\n4. Monitoring reprocessing\n\nAlso includes alternative HTTP API approach."
           },
           "response": []
         },
         {
-          "name": "DLQ - DLQ Message Structure Reference",
+          "name": "DLQ - List Kafka Topics (Shell Script)",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url_mastering}}/actuator/health?show-details=always",
+              "raw": "{{base_url_mastering}}/api/dlq/stats",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "api",
+                "dlq",
+                "stats"
+              ]
+            },
+            "description": "NOTE: This request retrieves DLQ topic information via the HTTP API.\n\nTo list Kafka topics from the command line, run:\n  ./tests/dlq-manage.sh list-topics\n\nExpected topics:\n- customer.raw (incoming events)\n- customer.mastered (processed golden records)\n- customer.dlq (failed events)"
+          },
+          "response": []
+        },
+        {
+          "name": "DLQ - Consume DLQ Messages (Shell Script)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/api/dlq/manual-reprocess",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "api",
+                "dlq",
+                "manual-reprocess"
+              ]
+            },
+            "description": "NOTE: To consume DLQ messages from the command line, run:\n  ./tests/dlq-manage.sh consume-dlq 10\n\nThis will display up to 10 DLQ messages from the customer.dlq topic.\n\nDLQ messages contain the original event, error details, processing history, and schema version."
+          },
+          "response": []
+        },
+        {
+          "name": "Retry - Check Mastering Service Logs (Shell Script)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/api/dlq/manual-reprocess",
+              "host": [
+                "{{base_url_mastering}}"
+              ],
+              "path": [
+                "api",
+                "dlq",
+                "manual-reprocess"
+              ]
+            },
+            "description": "NOTE: To view retry-related logs from the command line, run:\n  ./tests/dlq-manage.sh logs-retry 100\n\nOr view all logs:\n  ./tests/dlq-manage.sh logs-all 100\n\nLook for:\n- 'Retry attempt for event' — retry in progress\n- 'Sent to DLQ' — all retries exhausted\n- 'Successfully processed event' — normal processing"
+          },
+          "response": []
+        },
+        {
+          "name": "Retry - View DLQ Statistics from Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_mastering}}/actuator/metrics/mdm.failed_events_total",
               "host": [
                 "{{base_url_mastering}}"
               ],
               "path": [
                 "actuator",
-                "health"
-              ],
-              "query": [
-                {
-                  "key": "show-details",
-                  "value": "always"
-                }
+                "metrics",
+                "mdm.failed_events_total"
               ]
             },
-            "description": "DLQ Event Structure (com.mdm.mastering.dto.dlq.DlqEvent):\n\n{\n  \"originalEvent\": { /* CustomerRawEvent */ },\n  \"errorDetails\": {\n    \"exception\": \"ExceptionClassName\",\n    \"message\": \"Error message (truncated to 500 chars)\",\n    \"stackTrace\": \"Full stack trace\"\n  },\n  \"processingHistory\": [\n    {\n      \"attempt\": 3,\n      \"timestamp\": \"2026-04-03T20:30:05Z\",\n      \"error\": \"Error message (truncated to 200 chars)\"\n    }\n  ],\n  \"schemaVersion\": \"v1\"\n}\n\nError Types:\n- TRANSIENT: Retryable (DB deadlock, timeout) → retried 3 times with exponential backoff\n- PERMANENT: Non-retryable (constraint violation, invalid data) → goes directly to DLQ\n- BUSINESS: Business rule failures → logged and skipped\n\nRetry Configuration:\n- maxAttempts: 3\n- initialInterval: 1000ms\n- maxInterval: 10000ms\n- multiplier: 2.0"
+            "description": "Get DLQ statistics from Prometheus metrics.\n\nThis shows the total number of failed events that were sent to the DLQ.\n\nTo get comprehensive DLQ stats including configuration, use:\n  GET {{base_url_mastering}}/api/dlq/stats\n\nOr from command line:\n  ./tests/dlq-manage.sh stats"
           },
           "response": []
         }
@@ -2616,6 +3052,154 @@
         }
       ],
       "description": "Step-by-step demo. Run these requests in order to showcase the MDM system."
+    },
+    {
+      "name": "10 - Transactional Outbox",
+      "item": [
+        {
+          "name": "Outbox Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/outbox/stats",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "outbox",
+                "stats"
+              ]
+            },
+            "description": "Get outbox statistics including pending event count. Requires ADMIN role."
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{admin_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url_ingestion}}/api/outbox/stats",
+                  "host": [
+                    "{{base_url_ingestion}}"
+                  ],
+                  "path": [
+                    "api",
+                    "outbox",
+                    "stats"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "JSON",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"pendingEvents\": 5,\n  \"description\": \"Pending events are outbox records waiting to be published to Kafka\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Retry Outbox Event",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/outbox/retry/{{outbox_event_id}}",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "outbox",
+                "retry",
+                "{{outbox_event_id}}"
+              ]
+            },
+            "description": "Manually retry a specific outbox event by ID. Useful when an event failed due to a transient error and you want to republish it. Requires ADMIN role."
+          },
+          "response": []
+        },
+        {
+          "name": "Force Requeue Outbox Event",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{base_url_ingestion}}/api/outbox/force-requeue/{{outbox_event_id}}",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "api",
+                "outbox",
+                "force-requeue",
+                "{{outbox_event_id}}"
+              ]
+            },
+            "description": "Force requeue a processed outbox event for re-processing. This is an admin operation to recover from edge cases where an event was processed incorrectly. Requires ADMIN role."
+          },
+          "response": []
+        },
+        {
+          "name": "Check Outbox Metrics (Prometheus)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url_ingestion}}/actuator/prometheus",
+              "host": [
+                "{{base_url_ingestion}}"
+              ],
+              "path": [
+                "actuator",
+                "prometheus"
+              ]
+            },
+            "description": "Check Prometheus metrics for outbox: outbox_events_pending, outbox_events_published_total, outbox_events_failed_total, outbox_events_dlq_total."
+          },
+          "response": []
+        }
+      ],
+      "description": "Transactional Outbox Pattern management. Monitor pending outbox events, manually retry failed events, and force requeue processed events. All endpoints require ADMIN role."
     }
   ],
   "auth": {
@@ -2699,8 +3283,20 @@
     },
     {
       "key": "client_token",
+      "value": ""
+    },
+    {
+      "key": "test_national_id",
+      "value": ""
+    },
+    {
+      "key": "test_customer_id",
+      "value": ""
+    },
+    {
+      "key": "outbox_event_id",
       "value": "",
-      "type": "default"
+      "description": "Outbox event UUID for manual retry/requeue operations"
     }
   ]
 }

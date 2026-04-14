@@ -13,7 +13,7 @@
     <property name="fileExtensions" value="java, properties, xml"/>
 
     <!-- Exclusions -->
-    <module name="BeforeExecutionExclusionFile">
+    <module name="BeforeExecutionExclusionFileFilter">
         <property name="fileNamePattern" value="module\-info\.java$"/>
     </module>
 
@@ -51,14 +51,22 @@
 
     <!-- Translation check for properties files -->
     <module name="Translation"/>
-
-    <!-- Unique properties check -->
     <module name="UniqueProperties"/>
 
-    <!-- File name check for Java files -->
-    <module name="OuterTypeFilename"/>
-
     <!-- Suppress warnings filter -->
+    <module name="SuppressionFilter">
+        <property name="file" value="${config_loc}/suppressions.xml"/>
+        <property name="optional" value="true"/>
+    </module>
+
+    <!-- TreeWalker for Java files -->
+    <module name="TreeWalker">
+        <property name="fileExtensions" value="java"/>
+
+        <!-- File name check for Java files -->
+        <module name="OuterTypeFilename"/>
+
+        <!-- Annotations -->
     <module name="SuppressionFilter">
         <property name="file" value="${config_loc}/suppressions.xml"/>
         <property name="optional" value="true"/>

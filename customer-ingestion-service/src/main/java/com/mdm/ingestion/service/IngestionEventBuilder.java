@@ -4,16 +4,18 @@
  */
 package com.mdm.ingestion.service;
 
-import com.mdm.ingestion.dto.CustomerRawEvent;
 import java.time.Instant;
 import java.util.UUID;
+
 import org.springframework.stereotype.Component;
+
+import com.mdm.ingestion.dto.CustomerRawEvent;
 
 /**
  * Builds {@link CustomerRawEvent} instances from sanitized ingestion data.
  *
- * <p>This component encapsulates event construction logic, keeping the orchestration
- * service focused on workflow coordination. Follows the Single Responsibility Principle.
+ * <p>This component encapsulates event construction logic, keeping the orchestration service
+ * focused on workflow coordination. Follows the Single Responsibility Principle.
  */
 @Component
 public final class IngestionEventBuilder {

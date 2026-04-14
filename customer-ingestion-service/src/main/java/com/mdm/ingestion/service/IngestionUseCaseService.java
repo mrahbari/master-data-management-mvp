@@ -4,39 +4,47 @@
  */
 package com.mdm.ingestion.service;
 
-import com.mdm.ingestion.dto.CustomerIngestionRequest;
-import com.mdm.ingestion.dto.CustomerRawEvent;
-import com.mdm.ingestion.exception.ConcurrentProcessingException;
-import com.mdm.ingestion.exception.KafkaPublishException;
-import com.mdm.ingestion.service.IdempotencyService.IdempotencyResult;
-import com.mdm.ingestion.service.IngestionInputSanitizer.SanitizedRequest;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
-import java.util.concurrent.ExecutionException;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mdm.ingestion.dto.CustomerIngestionRequest;
+import com.mdm.ingestion.dto.CustomerRawEvent;
+import com.mdm.ingestion.entity.OutboxEvent;
+import com.mdm.ingestion.exception.ConcurrentProcessingException;
+import com.mdm.ingestion.repository.OutboxEventRepository;
+import com.mdm.ingestion.service.IdempotencyService.IdempotencyResult;
+import com.mdm.ingestion.service.IngestionInputSanitizer.SanitizedRequest;
+import com.mdm.ingestion.util.SensitiveDataMasker;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Orchestrates the customer ingestion use case.
  *
- * <p>This service follows the Single Responsibility Principle by focusing solely on
- * workflow orchestration. Cross-cutting concerns are delegated to specialized components:
+ * <p>This service follows the Single Responsibility Principle by focusing solely on workflow
+ * orchestration. Cross-cutting concerns are delegated to specialized components:
+ *
  * <ul>
- *   <li>{@link IngestionInputSanitizer} - input normalization and validation</li>
- *   <li>{@link IdempotencyService} - idempotency resolution</li>
- *   <li>{@link IngestionEventBuilder} - event construction</li>
- *   <li>{@link CustomerKafkaProducer} - Kafka publishing</li>
+ *   <li>{@link IngestionInputSanitizer} - input normalization and validation
+ *   <li>{@link IdempotencyService} - idempotency resolution
+ *   <li>{@link IngestionEventBuilder} - event construction
+ *   <li>{@link CustomerKafkaProducer} - Kafka publishing
  * </ul>
  *
  * <p><b>nationalId</b> is used as the canonical unique identifier throughout the system:
+ *
  * <ul>
- *   <li>Primary deduplication key (via deterministic idempotency key)</li>
- *   <li>Kafka partition key (ensures per-customer ordering)</li>
- *   <li>Stored in the event payload for downstream processing</li>
+ *   <li>Primary deduplication key (via deterministic idempotency key)
+ *   <li>Kafka partition key (ensures per-customer ordering)
+ *   <li>Stored in the event payload for downstream processing
  * </ul>
  */
 @Slf4j
@@ -44,10 +52,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class IngestionUseCaseService {
 
-  private final CustomerKafkaProducer kafkaProducer;
+  private final OutboxEventRepository outboxRepository;
   private final IdempotencyService idempotencyService;
+  private final IdempotencyFailureService idempotencyFailureService;
   private final IngestionInputSanitizer inputSanitizer;
   private final IngestionEventBuilder eventBuilder;
+  private final ObjectMapper objectMapper;
   private final Clock clock;
 
   @Value("${kafka.event-version:1.0}")
@@ -84,61 +94,59 @@ public class IngestionUseCaseService {
   // ─── Private handlers ──────────────────────────────────────────────────────
 
   private IngestionResponse handleIdempotencyHit(IdempotencyService.IdempotencyHit hit) {
-    log.info("Duplicate request detected: keyHash={}, eventId={}", maskKey(hit.keyHash()), hit.eventId());
+    log.info(
+        "Duplicate request detected: keyHash={}, eventId={}",
+        SensitiveDataMasker.maskHash(hit.keyHash()),
+        hit.eventId());
     return new IngestionResponse(hit.eventId(), IngestionStatus.CACHED);
   }
 
   private IngestionResponse handleProcessing(IdempotencyService.IdempotencyProcessing processing) {
-    log.info("Request still processing: keyHash={}", maskKey(processing.keyHash()));
+    log.info(
+        "Request still processing: keyHash={}", SensitiveDataMasker.maskHash(processing.keyHash()));
     throw new ConcurrentProcessingException(processing.keyHash());
   }
 
   private IngestionResponse processNewRequest(
       SanitizedRequest sanitized, String keyHash, Instant timestamp) {
     // Build event
-    CustomerRawEvent event = eventBuilder.build(
-        sanitized.nationalId(),
-        sanitized.name(),
-        sanitized.email(),
-        sanitized.phone(),
-        sanitized.sourceSystem(),
-        timestamp);
+    CustomerRawEvent event =
+        eventBuilder.build(
+            sanitized.nationalId(),
+            sanitized.name(),
+            sanitized.email(),
+            sanitized.phone(),
+            sanitized.sourceSystem(),
+            timestamp);
 
-    // Publish to Kafka
+    // Write to transactional outbox (solves dual-write problem)
+    // The OutboxPublisher will asynchronously publish to Kafka
     try {
-      // nationalId serves as the partition key for ordering guarantees
-      kafkaProducer.send(event, sanitized.nationalId(), eventVersion).get();
+      String payload = objectMapper.writeValueAsString(event);
+      OutboxEvent outbox =
+          OutboxEvent.create(
+              "CUSTOMER",
+              sanitized.nationalId(),
+              "CUSTOMER_RAW_EVENT",
+              payload,
+              keyHash,
+              eventVersion,
+              timestamp);
+      outboxRepository.save(outbox);
+
+      // Mark idempotency key as completed immediately since the outbox write succeeded
       idempotencyService.completeKey(keyHash, event.getEventId());
+
       log.info(
-          "Successfully published event to Kafka: eventId={}, nationalId={}",
+          "Successfully wrote event to outbox: eventId={}, nationalId={}",
           event.getEventId(),
-          maskNationalId(sanitized.nationalId()));
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      idempotencyService.failKey(keyHash, event.getEventId());
-      throw new KafkaPublishException(event.getEventId().toString(), keyHash, e);
-    } catch (ExecutionException e) {
-      idempotencyService.failKey(keyHash, event.getEventId());
-      throw new KafkaPublishException(event.getEventId().toString(), keyHash, e);
+          SensitiveDataMasker.maskNationalId(sanitized.nationalId()));
+    } catch (JsonProcessingException e) {
+      idempotencyFailureService.failKey(keyHash, event.getEventId());
+      throw new IllegalStateException("Failed to serialize event payload for outbox", e);
     }
 
     return new IngestionResponse(event.getEventId(), IngestionStatus.ACCEPTED);
-  }
-
-  // ─── Masking helpers ───────────────────────────────────────────────────────
-
-  private static String maskKey(String key) {
-    if (key == null || key.length() <= 8) {
-      return "***";
-    }
-    return key.substring(0, 4) + "..." + key.substring(key.length() - 4);
-  }
-
-  private static String maskNationalId(String nationalId) {
-    if (nationalId == null || nationalId.length() <= 4) {
-      return "***";
-    }
-    return "***" + nationalId.substring(nationalId.length() - 4);
   }
 
   // ─── Response types ────────────────────────────────────────────────────────

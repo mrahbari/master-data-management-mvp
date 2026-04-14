@@ -106,7 +106,6 @@ public class GlobalExceptionHandler {
   }
 
   @Builder
-  public record ErrorResponse(Instant timestamp, int status, String error, String message,
-                                Map<String, String> details) {
-  }
+  public record ErrorResponse(
+      Instant timestamp, int status, String error, String message, Map<String, String> details) {}
 }
